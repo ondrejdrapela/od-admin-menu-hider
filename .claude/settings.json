@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "You check whether Claude may finish its turn in a WordPress plugin project. Hook input JSON: $ARGUMENTS\n\nRules, apply in order:\n1. If stop_hook_active is true, return {\"ok\": true}.\n2. Read last_assistant_message. If it does NOT indicate that Claude created, edited or deleted plugin files (PHP, JS, CSS, templates, assets) during this turn - for example it only answered a question, explained something, proposed a plan or asked for approval - return {\"ok\": true}.\n3. If it indicates such changes AND it contains the marker [STAV ULOZEN, return {\"ok\": true}.\n4. Otherwise return {\"ok\": false, \"reason\": \"Zmenil jsi soubory pluginu, ale neulozil jsi stav. Zvys verzi pluginu, aktualizuj sekci Aktualni stav v CLAUDE.md, pridej zaznam do CHANGELOG.md a na konec odpovedi pridej samostatny radek [STAV ULOZEN vX.Y.Z].\"}\nRespond with the JSON object only.",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
