@@ -1,7 +1,7 @@
 <?php
 /**
  * Spustí se při smazání pluginu z administrace.
- * Uklidí po sobě uloženou volbu skrytých položek.
+ * Uklidí po sobě uložené volby pluginu.
  */
 
 if (!defined('WP_UNINSTALL_PLUGIN')) {
@@ -9,3 +9,4 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 }
 
 delete_option('od_amh_hidden');
+delete_option('od_amh_bar_items');

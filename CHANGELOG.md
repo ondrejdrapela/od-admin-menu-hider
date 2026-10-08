@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+- Skrytí celého levého menu pro vybranou roli (platí i pro administrátora). Obsah se roztáhne na celou šířku.
+- Nouzové zobrazení menu přes parametr `amh_menu=1` v adrese, kdyby sis menu skryl i sobě.
+- Horní lišta: seznam živých položek s možností je skrýt, přepsat jim název a nastavit vlastní ikonu.
+- Vlastní položky horní lišty: ikona z nabídky dashicons, vlastní název, adresa, otevření v novém okně a výběr rolí.
+  Ukládají se globálně do nové volby `od_amh_bar_items`.
+- Nastavení rozděleno do tří záložek: Levé menu, Horní lišta, Vlastní položky lišty.
+- Vizuální náhled: `_nahled/nahled-1.4.0.html`.
+
 ## 1.3.0
 - Plugin připraven na GitHub: soukromý repozitář `od-admin-menu-hider`.
 - Přidána knihovna Plugin Update Checker (v5.7) – aktualizace jde nově spustit tlačítkem přímo ve WordPressu.

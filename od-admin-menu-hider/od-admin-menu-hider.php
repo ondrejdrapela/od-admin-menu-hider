@@ -3,7 +3,7 @@
  * Plugin Name: OD Skrývač admin menu
  * Plugin URI:  https://www.odmarketing.cz
  * Description: Skryje vybrané položky levého admin menu a umožňuje měnit pořadí položek i podpoložek. Nastavuje se zvlášť pro každou roli. Nabídku generuje dynamicky podle aktuálního stavu menu.
- * Version:     1.3.0
+ * Version:     1.4.0
  * Author:      OD Marketing
  * Author URI:  https://www.odmarketing.cz
  * License:     GPL-2.0-or-later
@@ -32,9 +32,13 @@ if (defined('ODM_GITHUB_TOKEN')) {
 
 class OD_Admin_Menu_Hider {
 
-    const OPTION    = 'od_amh_hidden';
-    const PAGE_SLUG = 'od-admin-menu-hider';
-    const NONCE     = 'od_amh_save';
+    const OPTION     = 'od_amh_hidden';
+    const OPTION_BAR = 'od_amh_bar_items';
+    const PAGE_SLUG  = 'od-admin-menu-hider';
+    const NONCE      = 'od_amh_save';
+
+    /** Parametr v URL, kterým si dočasně vynutíš zobrazení skrytého levého menu. */
+    const ESCAPE_ARG = 'amh_menu';
 
     /** @var array Snapshot horního menu pořízený PŘED skrytím */
     private $snapshot_menu = array();
@@ -44,6 +48,9 @@ class OD_Admin_Menu_Hider {
 
     /** @var string Hook suffix vlastní stránky */
     private $page_hook = '';
+
+    /** @var array Snapshot uzlů horní lišty pořízený PŘED jejich úpravou */
+    private $snapshot_bar = array();
 
     public function __construct() {
         // Pořadí priorit:
@@ -61,6 +68,18 @@ class OD_Admin_Menu_Hider {
         // Vlastní pořadí položek horní úrovně (oficiální cesta přes filtr)
         add_filter('custom_menu_order', array($this, 'enable_custom_order'));
         add_filter('menu_order', array($this, 'apply_custom_order'));
+
+        // Horní lišta:
+        // 9998  -> snapshot všech uzlů (ještě nic není skryté ani přepsané)
+        // 9999  -> skrytí, přejmenování a vlastní ikony
+        // 10000 -> vlastní položky
+        add_action('admin_bar_menu', array($this, 'take_bar_snapshot'), 9998);
+        add_action('admin_bar_menu', array($this, 'apply_bar_changes'), 9999);
+        add_action('admin_bar_menu', array($this, 'apply_bar_custom_items'), 10000);
+
+        // CSS pro skryté levé menu a pro vlastní ikony v liště
+        add_action('admin_head', array($this, 'print_front_styles'));
+        add_action('wp_head', array($this, 'print_front_styles'));
 
         // Odkaz na nastavení v seznamu pluginů
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'action_links'));
@@ -108,11 +127,54 @@ class OD_Admin_Menu_Hider {
         $all = $this->get_all_settings();
         $r   = isset($all[$role_key]) && is_array($all[$role_key]) ? $all[$role_key] : array();
         return array(
-            'top'       => isset($r['top']) && is_array($r['top']) ? $r['top'] : array(),
-            'sub'       => isset($r['sub']) && is_array($r['sub']) ? $r['sub'] : array(),
-            'order'     => isset($r['order']) && is_array($r['order']) ? $r['order'] : array(),
-            'order_sub' => isset($r['order_sub']) && is_array($r['order_sub']) ? $r['order_sub'] : array(),
+            'top'        => isset($r['top']) && is_array($r['top']) ? $r['top'] : array(),
+            'sub'        => isset($r['sub']) && is_array($r['sub']) ? $r['sub'] : array(),
+            'order'      => isset($r['order']) && is_array($r['order']) ? $r['order'] : array(),
+            'order_sub'  => isset($r['order_sub']) && is_array($r['order_sub']) ? $r['order_sub'] : array(),
+            'hide_menu'  => !empty($r['hide_menu']),
+            'bar_hidden' => isset($r['bar_hidden']) && is_array($r['bar_hidden']) ? $r['bar_hidden'] : array(),
+            'bar_edit'   => isset($r['bar_edit']) && is_array($r['bar_edit']) ? $r['bar_edit'] : array(),
         );
+    }
+
+    /* ---------------------------------------------------------------------
+     * Vlastní položky horní lišty (globální seznam, role se u nich zaškrtávají)
+     * ------------------------------------------------------------------- */
+
+    /** Všechny vlastní položky lišty, v uloženém pořadí. */
+    private function get_bar_items() {
+        $stored = get_option(self::OPTION_BAR, array());
+        if (!is_array($stored)) {
+            return array();
+        }
+
+        $items = array();
+        foreach ($stored as $item) {
+            if (!is_array($item) || empty($item['title'])) {
+                continue;
+            }
+            $items[] = array(
+                'id'      => isset($item['id']) ? (string) $item['id'] : '',
+                'icon'    => isset($item['icon']) ? (string) $item['icon'] : '',
+                'title'   => (string) $item['title'],
+                'url'     => isset($item['url']) ? (string) $item['url'] : '',
+                'new_tab' => !empty($item['new_tab']),
+                'roles'   => isset($item['roles']) && is_array($item['roles']) ? $item['roles'] : array(),
+            );
+        }
+        return $items;
+    }
+
+    /** Vlastní položky, které se mají zobrazit přihlášenému uživateli. */
+    private function get_bar_items_for_user() {
+        $roles = $this->current_user_roles();
+        $out   = array();
+        foreach ($this->get_bar_items() as $item) {
+            if (array_intersect($item['roles'], $roles)) {
+                $out[] = $item;
+            }
+        }
+        return $out;
     }
 
     private function current_user_roles() {
@@ -130,6 +192,41 @@ class OD_Admin_Menu_Hider {
             $sub = array_merge($sub, $rs['sub']);
         }
         return array('top' => array_unique($top), 'sub' => array_unique($sub));
+    }
+
+    /** Má se přihlášenému uživateli skrýt celé levé menu? Stačí jedna role. */
+    private function should_hide_menu() {
+        foreach ($this->current_user_roles() as $role_key) {
+            $rs = $this->get_role_settings($role_key);
+            if ($rs['hide_menu']) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Sjednocené skryté uzly horní lišty napříč rolemi uživatele. */
+    private function get_effective_bar_hidden() {
+        $ids = array();
+        foreach ($this->current_user_roles() as $role_key) {
+            $rs  = $this->get_role_settings($role_key);
+            $ids = array_merge($ids, $rs['bar_hidden']);
+        }
+        return array_unique($ids);
+    }
+
+    /** Úpravy uzlů lišty (název, ikona) z první role, která daný uzel definuje. */
+    private function get_effective_bar_edit() {
+        $result = array();
+        foreach ($this->current_user_roles() as $role_key) {
+            $rs = $this->get_role_settings($role_key);
+            foreach ($rs['bar_edit'] as $node_id => $edit) {
+                if (!isset($result[$node_id]) && is_array($edit)) {
+                    $result[$node_id] = $edit;
+                }
+            }
+        }
+        return $result;
     }
 
     /** Pořadí horní úrovně z první role uživatele, která ho má uložené. */
@@ -248,6 +345,128 @@ class OD_Admin_Menu_Hider {
     }
 
     /* ---------------------------------------------------------------------
+     * Horní lišta
+     * ------------------------------------------------------------------- */
+
+    /** Snapshot uzlů lišty ještě předtím, než do nich sáhneme. */
+    public function take_bar_snapshot($wp_admin_bar) {
+        $nodes = $wp_admin_bar->get_nodes();
+        $this->snapshot_bar = is_array($nodes) ? $nodes : array();
+    }
+
+    /** Složí obsah položky lišty z ikony a názvu. */
+    private function bar_title_html($icon, $label) {
+        $html = '';
+        if ('' !== $icon) {
+            $html .= '<span class="ab-icon od-amh-icon dashicons ' . esc_attr($icon) . '" aria-hidden="true"></span>';
+        }
+        $html .= '<span class="ab-label">' . esc_html($label) . '</span>';
+        return $html;
+    }
+
+    /** Skrytí uzlů a přepsání jejich názvů či ikon. */
+    public function apply_bar_changes($wp_admin_bar) {
+        foreach ($this->get_effective_bar_hidden() as $node_id) {
+            $wp_admin_bar->remove_node($node_id);
+        }
+
+        foreach ($this->get_effective_bar_edit() as $node_id => $edit) {
+            $icon  = isset($edit['icon']) ? (string) $edit['icon'] : '';
+            $label = isset($edit['title']) ? (string) $edit['title'] : '';
+            if ('' === $icon && '' === $label) {
+                continue;
+            }
+
+            $node = $wp_admin_bar->get_node($node_id);
+            if (!$node) {
+                continue;
+            }
+
+            // Prázdný název znamená "nech původní", jen vyčištěný od bublin a spanů.
+            if ('' === $label) {
+                $label = $this->clean_title($node->title);
+            }
+
+            $wp_admin_bar->add_node(array(
+                'id'    => $node_id,
+                'title' => $this->bar_title_html($icon, $label),
+            ));
+        }
+    }
+
+    /** Přidá do lišty vlastní položky nastavené pro role uživatele. */
+    public function apply_bar_custom_items($wp_admin_bar) {
+        foreach ($this->get_bar_items_for_user() as $item) {
+            $meta = array();
+            if ($item['new_tab']) {
+                $meta['target'] = '_blank';
+                $meta['rel']    = 'noopener noreferrer';
+            }
+
+            $wp_admin_bar->add_node(array(
+                'id'     => $item['id'],
+                'title'  => $this->bar_title_html($item['icon'], $item['title']),
+                'href'   => $this->resolve_url($item['url']),
+                'meta'   => $meta,
+            ));
+        }
+    }
+
+    /**
+     * Doplní adresu. Když uživatel napíše jen "edit.php?post_type=faktura",
+     * bereme to jako adresu v administraci. Absolutní odkazy necháváme být.
+     */
+    private function resolve_url($url) {
+        $url = trim((string) $url);
+        if ('' === $url) {
+            return '';
+        }
+        if (preg_match('#^(https?:)?//#i', $url) || 0 === strpos($url, '/')) {
+            return esc_url_raw($url);
+        }
+        return esc_url_raw(admin_url($url));
+    }
+
+    /* ---------------------------------------------------------------------
+     * Styly (skryté levé menu, vlastní ikony v liště)
+     * ------------------------------------------------------------------- */
+
+    /** Je právě aktivní nouzové zobrazení menu přes URL? */
+    private function escape_active() {
+        return isset($_GET[self::ESCAPE_ARG]);
+    }
+
+    public function print_front_styles() {
+        $css = '';
+
+        if (is_admin() && $this->should_hide_menu() && !$this->escape_active()) {
+            $css .= '#adminmenumain, #adminmenuback, #adminmenuwrap { display:none !important; }';
+            $css .= '#wpcontent, #wpfooter, .auto-fold #wpcontent, .auto-fold #wpfooter { margin-left:0 !important; }';
+            $css .= '#wpbody-content { padding-bottom:65px; }';
+            $css .= '@media screen and (max-width:782px){ #wpcontent, #wpfooter { margin-left:0 !important; } }';
+        }
+
+        // U položek s vlastní ikonou potlačíme původní ikonu z motivu administrace.
+        $ids = array();
+        foreach ($this->get_effective_bar_edit() as $node_id => $edit) {
+            if (!empty($edit['icon'])) {
+                $ids[] = '#wpadminbar #wp-admin-bar-' . sanitize_html_class($node_id) . ' > .ab-item:before';
+            }
+        }
+        if ($ids) {
+            $css .= implode(',', $ids) . ' { content:none !important; display:none !important; }';
+        }
+
+        $css .= '#wpadminbar .od-amh-icon { float:left; font-family:dashicons !important; font-size:20px; line-height:1; width:20px; height:20px; margin-right:6px; }';
+        $css .= '#wpadminbar .od-amh-icon:before { font-family:dashicons !important; }';
+
+        if ('' === $css) {
+            return;
+        }
+        echo '<style id="od-amh-style">' . $css . '</style>' . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput
+    }
+
+    /* ---------------------------------------------------------------------
      * Administrace
      * ------------------------------------------------------------------- */
 
@@ -346,20 +565,231 @@ class OD_Admin_Menu_Hider {
             }
         }
 
+        $bar_hidden = array();
+        if (!empty($_POST['bar_hidden']) && is_array($_POST['bar_hidden'])) {
+            foreach ($_POST['bar_hidden'] as $node_id) {
+                $bar_hidden[] = sanitize_text_field(wp_unslash($node_id));
+            }
+        }
+
+        $bar_edit = array();
+        if (!empty($_POST['bar_edit']) && is_array($_POST['bar_edit'])) {
+            foreach ($_POST['bar_edit'] as $node_id => $edit) {
+                if (!is_array($edit)) {
+                    continue;
+                }
+                $title = isset($edit['title']) ? sanitize_text_field(wp_unslash($edit['title'])) : '';
+                $icon  = isset($edit['icon']) ? $this->sanitize_icon(wp_unslash($edit['icon'])) : '';
+                if ('' === $title && '' === $icon) {
+                    continue; // nic nepřepisujeme, nemá smysl to ukládat
+                }
+                $bar_edit[sanitize_text_field(wp_unslash($node_id))] = array(
+                    'title' => $title,
+                    'icon'  => $icon,
+                );
+            }
+        }
+
         $all        = $this->get_all_settings();
         $all[$role] = array(
-            'top'       => $top,
-            'sub'       => $sub,
-            'order'     => $order,
-            'order_sub' => $order_sub,
+            'top'        => $top,
+            'sub'        => $sub,
+            'order'      => $order,
+            'order_sub'  => $order_sub,
+            'hide_menu'  => !empty($_POST['hide_menu']),
+            'bar_hidden' => $bar_hidden,
+            'bar_edit'   => $bar_edit,
         );
         update_option(self::OPTION, $all);
+
+        update_option(self::OPTION_BAR, $this->collect_bar_items_from_post());
 
         wp_safe_redirect(add_query_arg(
             array('page' => self::PAGE_SLUG, 'amh_role' => $role, 'updated' => '1'),
             admin_url('admin.php')
         ));
         exit;
+    }
+
+    /** Nabídka ikon pro výběr (dashicons, které jsou v administraci vždy k dispozici). */
+    private function dashicon_choices() {
+        return array(
+            'dashicons-admin-home', 'dashicons-dashboard', 'dashicons-admin-site', 'dashicons-admin-page',
+            'dashicons-admin-post', 'dashicons-admin-media', 'dashicons-admin-links', 'dashicons-admin-comments',
+            'dashicons-admin-appearance', 'dashicons-admin-plugins', 'dashicons-admin-users', 'dashicons-admin-tools',
+            'dashicons-admin-settings', 'dashicons-admin-network', 'dashicons-admin-generic', 'dashicons-admin-collapse',
+            'dashicons-admin-customizer', 'dashicons-admin-multisite',
+            'dashicons-menu', 'dashicons-list-view', 'dashicons-grid-view', 'dashicons-filter', 'dashicons-sort',
+            'dashicons-search', 'dashicons-screenoptions', 'dashicons-hidden', 'dashicons-visibility',
+            'dashicons-cart', 'dashicons-products', 'dashicons-store', 'dashicons-money', 'dashicons-money-alt',
+            'dashicons-bank', 'dashicons-chart-bar', 'dashicons-chart-line', 'dashicons-chart-pie',
+            'dashicons-chart-area', 'dashicons-businessman', 'dashicons-businesswoman', 'dashicons-groups',
+            'dashicons-id', 'dashicons-id-alt', 'dashicons-portfolio', 'dashicons-clipboard', 'dashicons-analytics',
+            'dashicons-megaphone', 'dashicons-tickets-alt', 'dashicons-awards', 'dashicons-printer',
+            'dashicons-media-document', 'dashicons-media-spreadsheet', 'dashicons-media-text', 'dashicons-media-archive',
+            'dashicons-media-default', 'dashicons-media-code', 'dashicons-media-interactive', 'dashicons-pdf',
+            'dashicons-download', 'dashicons-upload', 'dashicons-backup', 'dashicons-update', 'dashicons-database',
+            'dashicons-cloud', 'dashicons-archive', 'dashicons-category', 'dashicons-tag', 'dashicons-book',
+            'dashicons-book-alt', 'dashicons-index-card', 'dashicons-sticky', 'dashicons-paperclip',
+            'dashicons-calendar', 'dashicons-calendar-alt', 'dashicons-clock', 'dashicons-schedule',
+            'dashicons-email', 'dashicons-email-alt', 'dashicons-phone', 'dashicons-format-chat',
+            'dashicons-testimonial', 'dashicons-buddicons-activity', 'dashicons-share', 'dashicons-rss',
+            'dashicons-location', 'dashicons-location-alt', 'dashicons-building', 'dashicons-palmtree',
+            'dashicons-car', 'dashicons-truck', 'dashicons-airplane', 'dashicons-bell',
+            'dashicons-star-filled', 'dashicons-heart', 'dashicons-flag', 'dashicons-thumbs-up',
+            'dashicons-yes', 'dashicons-yes-alt', 'dashicons-no', 'dashicons-no-alt', 'dashicons-dismiss',
+            'dashicons-warning', 'dashicons-info', 'dashicons-marker', 'dashicons-lightbulb', 'dashicons-sos',
+            'dashicons-lock', 'dashicons-unlock', 'dashicons-privacy', 'dashicons-shield', 'dashicons-key',
+            'dashicons-edit', 'dashicons-edit-large', 'dashicons-trash', 'dashicons-plus', 'dashicons-plus-alt',
+            'dashicons-minus', 'dashicons-insert', 'dashicons-saved', 'dashicons-external',
+            'dashicons-admin-links', 'dashicons-art', 'dashicons-camera', 'dashicons-format-image',
+            'dashicons-format-gallery', 'dashicons-format-video', 'dashicons-format-audio', 'dashicons-video-alt3',
+            'dashicons-images-alt2', 'dashicons-desktop', 'dashicons-smartphone', 'dashicons-tablet',
+            'dashicons-laptop', 'dashicons-wordpress', 'dashicons-networking', 'dashicons-performance',
+            'dashicons-hammer', 'dashicons-forms', 'dashicons-feedback', 'dashicons-text-page',
+            'dashicons-welcome-write-blog', 'dashicons-welcome-view-site', 'dashicons-welcome-widgets-menus',
+            'dashicons-welcome-learn-more', 'dashicons-align-left', 'dashicons-align-center', 'dashicons-align-right',
+            'dashicons-arrow-up-alt', 'dashicons-arrow-down-alt', 'dashicons-arrow-left-alt', 'dashicons-arrow-right-alt',
+            'dashicons-controls-play', 'dashicons-randomize', 'dashicons-redo', 'dashicons-undo',
+            'dashicons-tide', 'dashicons-universal-access', 'dashicons-translation', 'dashicons-carrot',
+            'dashicons-food', 'dashicons-coffee', 'dashicons-drumstick', 'dashicons-pets', 'dashicons-superhero',
+        );
+    }
+
+    /** Povolíme jen platný název dashicon třídy. */
+    private function sanitize_icon($icon) {
+        $icon = sanitize_html_class((string) $icon);
+        return (0 === strpos($icon, 'dashicons-')) ? $icon : '';
+    }
+
+    /** Přečte vlastní položky lišty z odeslaného formuláře, v pořadí z přetahování. */
+    private function collect_bar_items_from_post() {
+        $raw = (!empty($_POST['bar_item']) && is_array($_POST['bar_item'])) ? $_POST['bar_item'] : array();
+        if (!$raw) {
+            return array();
+        }
+
+        // Pořadí řádků po přetažení; co v něm chybí, doplníme na konec.
+        $order = array();
+        if (!empty($_POST['bar_order'])) {
+            $decoded = json_decode(wp_unslash($_POST['bar_order']), true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $key) {
+                    if (isset($raw[$key]) && !in_array((string) $key, $order, true)) {
+                        $order[] = (string) $key;
+                    }
+                }
+            }
+        }
+        foreach (array_keys($raw) as $key) {
+            if (!in_array((string) $key, $order, true)) {
+                $order[] = (string) $key;
+            }
+        }
+
+        $roles = $this->get_roles();
+        $items = array();
+        $used  = array();
+
+        foreach ($order as $key) {
+            $row   = is_array($raw[$key]) ? $raw[$key] : array();
+            $title = isset($row['title']) ? sanitize_text_field(wp_unslash($row['title'])) : '';
+            if ('' === $title) {
+                continue; // prázdný název = smazaný řádek
+            }
+
+            $id = isset($row['id']) ? sanitize_html_class(wp_unslash($row['id'])) : '';
+            if ('' === $id || 0 !== strpos($id, 'odbar-') || isset($used[$id])) {
+                $id = 'odbar-' . wp_generate_password(8, false, false);
+            }
+            $used[$id] = true;
+
+            $item_roles = array();
+            if (!empty($row['roles']) && is_array($row['roles'])) {
+                foreach ($row['roles'] as $role_key) {
+                    $role_key = sanitize_text_field(wp_unslash($role_key));
+                    if (isset($roles[$role_key])) {
+                        $item_roles[] = $role_key;
+                    }
+                }
+            }
+
+            $items[] = array(
+                'id'      => $id,
+                'icon'    => isset($row['icon']) ? $this->sanitize_icon(wp_unslash($row['icon'])) : '',
+                'title'   => $title,
+                'url'     => isset($row['url']) ? esc_url_raw(trim(wp_unslash($row['url'])), array('http', 'https')) : '',
+                'new_tab' => !empty($row['new_tab']),
+                'roles'   => $item_roles,
+            );
+        }
+
+        return $items;
+    }
+
+    /**
+     * Uzly horní lišty ze snapshotu jako ploché pole id => ['title'=>..., 'depth'=>...].
+     * Skupiny (neviditelné obaly) přeskakujeme, jejich děti napojíme o úroveň výš.
+     */
+    private function bar_nodes() {
+        $children = array();
+        $groups   = array();
+
+        foreach ($this->snapshot_bar as $id => $node) {
+            if (!empty($node->group)) {
+                $groups[$id] = true;
+            }
+        }
+
+        foreach ($this->snapshot_bar as $id => $node) {
+            $parent = isset($node->parent) ? (string) $node->parent : '';
+            // Skupinu přeskočíme a dítě pověsíme na jejího rodiče.
+            $guard = 0;
+            while ('' !== $parent && isset($groups[$parent]) && $guard < 10) {
+                $parent = isset($this->snapshot_bar[$parent]->parent) ? (string) $this->snapshot_bar[$parent]->parent : '';
+                $guard++;
+            }
+            if (isset($groups[$id])) {
+                continue;
+            }
+            $children[$parent][] = $id;
+        }
+
+        $out = array();
+        // Položky nejvyšší úrovně mají rodiče buď prázdného, nebo explicitně 'root'.
+        $this->walk_bar_nodes($children, '', 0, $out);
+        $this->walk_bar_nodes($children, 'root', 0, $out);
+
+        // Uzly, na které se přes strom nedostaneme (osiřelý rodič), doplníme na konec.
+        foreach ($this->snapshot_bar as $id => $node) {
+            if (!isset($groups[$id]) && !isset($out[$id])) {
+                $out[$id] = array('title' => $this->bar_node_title($node, $id), 'depth' => 0);
+            }
+        }
+
+        return $out;
+    }
+
+    private function walk_bar_nodes(array $children, $parent, $depth, array &$out) {
+        if (empty($children[$parent]) || $depth > 4) {
+            return;
+        }
+        foreach ($children[$parent] as $id) {
+            if (isset($out[$id])) {
+                continue;
+            }
+            $out[$id] = array(
+                'title' => $this->bar_node_title($this->snapshot_bar[$id], $id),
+                'depth' => $depth,
+            );
+            $this->walk_bar_nodes($children, $id, $depth + 1, $out);
+        }
+    }
+
+    /** Název uzlu lišty; u čistě ikonových položek použijeme jejich id. */
+    private function bar_node_title($node, $id) {
+        $title = $this->clean_title(isset($node->title) ? $node->title : '');
+        return ('' !== $title) ? $title : $id;
     }
 
     /** Top level položky ze snapshotu jako slug => název (bez oddělovačů). */
@@ -414,6 +844,87 @@ class OD_Admin_Menu_Hider {
         return $out;
     }
 
+    /** Tlačítko pro výběr ikony. Vlastní mřížka ikon je na stránce jen jednou, sdílená. */
+    private function render_icon_picker($name, $value, array $icons) {
+        $value = in_array($value, $icons, true) ? $value : $this->sanitize_icon($value);
+        ?>
+        <span class="od-amh-icon-field">
+            <button type="button" class="button od-amh-icon-btn">
+                <span class="dashicons <?php echo esc_attr($value ? $value : 'dashicons-plus-alt2'); ?>"></span>
+                <span class="od-amh-icon-name"><?php echo esc_html($value ? $value : 'vybrat'); ?></span>
+            </button>
+            <input type="hidden" class="od-amh-icon-input" name="<?php echo esc_attr($name); ?>" value="<?php echo esc_attr($value); ?>">
+        </span>
+        <?php
+    }
+
+    /** Jeden řádek vlastní položky lišty. $item = null znamená prázdnou šablonu. */
+    private function render_bar_item_row($index, $item, array $roles, array $icons) {
+        $base    = 'bar_item[' . $index . ']';
+        $id      = $item ? $item['id'] : '';
+        $icon    = $item ? $item['icon'] : '';
+        $title   = $item ? $item['title'] : '';
+        $url     = $item ? $item['url'] : '';
+        $new_tab = $item ? $item['new_tab'] : false;
+        $checked = $item ? $item['roles'] : array('administrator');
+        ?>
+        <div class="od-amh-item-row" data-key="<?php echo esc_attr($index); ?>">
+            <span class="dashicons dashicons-menu od-amh-grip od-amh-item-grip"></span>
+            <input type="hidden" name="<?php echo esc_attr($base); ?>[id]" value="<?php echo esc_attr($id); ?>">
+
+            <div class="od-amh-item-fields">
+                <div class="od-amh-item-line">
+                    <?php $this->render_icon_picker($base . '[icon]', $icon, $icons); ?>
+                    <input type="text" name="<?php echo esc_attr($base); ?>[title]" value="<?php echo esc_attr($title); ?>"
+                           placeholder="Název (např. Faktury)" class="od-amh-item-title">
+                    <input type="text" name="<?php echo esc_attr($base); ?>[url]" value="<?php echo esc_attr($url); ?>"
+                           placeholder="Adresa (např. edit.php?post_type=faktura)" class="od-amh-item-url">
+                    <button type="button" class="button-link od-amh-item-remove" title="Odebrat položku">
+                        <span class="dashicons dashicons-trash"></span>
+                    </button>
+                </div>
+
+                <div class="od-amh-item-line od-amh-item-meta">
+                    <label>
+                        <input type="checkbox" name="<?php echo esc_attr($base); ?>[new_tab]" value="1" <?php checked($new_tab); ?>>
+                        otevřít v novém okně
+                    </label>
+                    <span class="od-amh-roles">
+                        <strong>Zobrazit rolím:</strong>
+                        <?php foreach ($roles as $key => $name) : ?>
+                            <label>
+                                <input type="checkbox" name="<?php echo esc_attr($base); ?>[roles][]"
+                                       value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $checked, true)); ?>>
+                                <?php echo esc_html($name); ?>
+                            </label>
+                        <?php endforeach; ?>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    /** Sdílená nabídka ikon, na stránce jen jednou. */
+    private function render_icon_palette(array $icons) {
+        ?>
+        <div id="od-amh-icon-pop" hidden>
+            <input type="search" id="od-amh-icon-search" placeholder="Hledat ikonu&hellip;" autocomplete="off">
+            <div class="od-amh-icon-grid">
+                <button type="button" class="od-amh-icon-opt" data-icon="" title="Bez ikony">
+                    <span class="dashicons dashicons-no-alt"></span>
+                </button>
+                <?php foreach ($icons as $icon) : ?>
+                    <button type="button" class="od-amh-icon-opt" data-icon="<?php echo esc_attr($icon); ?>"
+                            title="<?php echo esc_attr($icon); ?>">
+                        <span class="dashicons <?php echo esc_attr($icon); ?>"></span>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php
+    }
+
     public function render_page() {
         if (!current_user_can('manage_options')) {
             return;
@@ -427,6 +938,11 @@ class OD_Admin_Menu_Hider {
 
         $top_items     = $this->top_items();
         $ordered_top   = $this->merge_order($settings['order'], $top_items);
+
+        $bar_nodes  = $this->bar_nodes();
+        $bar_items  = $this->get_bar_items();
+        $bar_hidden = array_flip($settings['bar_hidden']);
+        $icons      = $this->dashicon_choices();
 
         // Předpřipravíme strom pro pravý panel a zároveň JSON pro hidden input.
         $tree = array();
@@ -456,10 +972,9 @@ class OD_Admin_Menu_Hider {
             <?php endif; ?>
 
             <p style="max-width:820px">
-                Nastavení se ukládá zvlášť pro každou roli. Vyber roli, zaškrtni položky ke skrytí
-                a přetažením nastav pořadí položek i podpoložek. Skrytí i pořadí se projeví uživatelům
-                s danou rolí. Vlastní menu uvidíš změněné podle své role, cizí role otestuješ až po
-                přihlášení pod tou rolí. Skrytí je pouze vizuální, stránka zůstane dostupná přes přímou URL.
+                Nastavení se ukládá zvlášť pro každou roli. Vyber roli a pak uprav levé menu i horní lištu.
+                Změny se projeví uživatelům s danou rolí, u sebe je uvidíš podle své vlastní role.
+                Skrytí je pouze vizuální, stránka zůstane dostupná přes přímou URL.
             </p>
 
             <form method="get" style="margin:16px 0">
@@ -479,7 +994,32 @@ class OD_Admin_Menu_Hider {
                 <input type="hidden" name="action" value="<?php echo esc_attr(self::NONCE); ?>">
                 <input type="hidden" name="amh_role" value="<?php echo esc_attr($role); ?>">
                 <input type="hidden" name="order_data" id="od-amh-order" value="<?php echo esc_attr(wp_json_encode($json)); ?>">
+                <input type="hidden" name="bar_order" id="od-amh-bar-order" value="">
                 <?php wp_nonce_field(self::NONCE); ?>
+
+                <h2 class="nav-tab-wrapper od-amh-tabs">
+                    <a href="#od-amh-tab-menu" class="nav-tab nav-tab-active">Levé menu</a>
+                    <a href="#od-amh-tab-bar" class="nav-tab">Horní lišta</a>
+                    <a href="#od-amh-tab-custom" class="nav-tab">Vlastní položky lišty</a>
+                </h2>
+
+                <!-- ============ Záložka 1: levé menu ============ -->
+                <div id="od-amh-tab-menu" class="od-amh-panel">
+
+                    <div class="od-amh-box">
+                        <label>
+                            <input type="checkbox" name="hide_menu" value="1" <?php checked($settings['hide_menu']); ?>>
+                            <strong>Skrýt celé levé menu</strong>
+                        </label>
+                        <p class="description" style="margin:8px 0 0">
+                            Levé menu zmizí i s místem po něm, obsah se roztáhne na celou šířku.
+                            Platí i pro administrátora, takže si ho můžeš skrýt i sám sobě.
+                            Kdyby ses potřeboval k menu dostat, přidej do adresy
+                            <code>&amp;<?php echo esc_html(self::ESCAPE_ARG); ?>=1</code> &ndash; menu se na té stránce dočasně objeví.
+                            Záchranná adresa na toto nastavení:<br>
+                            <code><?php echo esc_html(admin_url('admin.php?page=' . self::PAGE_SLUG . '&' . self::ESCAPE_ARG . '=1')); ?></code>
+                        </p>
+                    </div>
 
                 <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
 
@@ -560,8 +1100,88 @@ class OD_Admin_Menu_Hider {
                     </div>
                 </div>
 
+                </div><!-- /tab menu -->
+
+                <!-- ============ Záložka 2: horní lišta ============ -->
+                <div id="od-amh-tab-bar" class="od-amh-panel" hidden>
+                    <p class="description" style="max-width:820px;margin-bottom:12px">
+                        Seznam se bere z živé horní lišty, takže obsahuje i položky přidané jinými pluginy.
+                        Zaškrtnutím položku skryješ. Vyplněný název přepíše původní, prázdné pole nechá původní.
+                        Vlastní ikona nahradí tu původní.
+                    </p>
+
+                    <?php if (!$bar_nodes) : ?>
+                        <div class="notice notice-warning inline"><p>
+                            Horní lišta se teď nevykresluje, takže není co vypsat. Zapni si ji v
+                            <a href="<?php echo esc_url(admin_url('profile.php')); ?>">svém profilu</a>
+                            (Zobrazovat panel nástrojů při prohlížení webu) a stránku načti znovu.
+                        </p></div>
+                    <?php else : ?>
+                        <table class="widefat striped">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px">Skrýt</th>
+                                    <th>Položka lišty</th>
+                                    <th style="width:220px">Vlastní název</th>
+                                    <th style="width:200px">Vlastní ikona</th>
+                                    <th style="width:160px">ID</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($bar_nodes as $node_id => $node) :
+                                $edit  = isset($settings['bar_edit'][$node_id]) ? (array) $settings['bar_edit'][$node_id] : array();
+                                $e_tit = isset($edit['title']) ? $edit['title'] : '';
+                                $e_ico = isset($edit['icon']) ? $edit['icon'] : ''; ?>
+                                <tr>
+                                    <td><input type="checkbox" name="bar_hidden[]" value="<?php echo esc_attr($node_id); ?>" <?php checked(isset($bar_hidden[$node_id])); ?>></td>
+                                    <td style="padding-left:<?php echo (int) (12 + $node['depth'] * 24); ?>px">
+                                        <?php if ($node['depth'] > 0) : ?>&#8627; <?php endif; ?>
+                                        <?php echo esc_html($node['title']); ?>
+                                    </td>
+                                    <td>
+                                        <input type="text" class="regular-text" style="width:100%"
+                                               name="bar_edit[<?php echo esc_attr($node_id); ?>][title]"
+                                               value="<?php echo esc_attr($e_tit); ?>" placeholder="ponechat původní">
+                                    </td>
+                                    <td><?php $this->render_icon_picker('bar_edit[' . $node_id . '][icon]', $e_ico, $icons); ?></td>
+                                    <td><code style="font-size:11px"><?php echo esc_html($node_id); ?></code></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endif; ?>
+                </div><!-- /tab bar -->
+
+                <!-- ============ Záložka 3: vlastní položky lišty ============ -->
+                <div id="od-amh-tab-custom" class="od-amh-panel" hidden>
+                    <p class="description" style="max-width:820px;margin-bottom:12px">
+                        Vlastní položky platí pro celý web, u každé si zaškrtneš role, kterým se má zobrazit
+                        (nejsou tedy vázané na roli vybranou nahoře). Do adresy můžeš napsat celou URL
+                        i jen část pro administraci, například <code>edit.php?post_type=faktura</code>.
+                        Pořadí změníš přetažením za úchyt vlevo. Položku smažeš tlačítkem Odebrat.
+                    </p>
+
+                    <div id="od-amh-bar-items">
+                        <?php foreach ($bar_items as $i => $item) {
+                            $this->render_bar_item_row($i, $item, $roles, $icons);
+                        } ?>
+                    </div>
+
+                    <p>
+                        <button type="button" class="button" id="od-amh-add-item">
+                            <span class="dashicons dashicons-plus-alt2" style="vertical-align:text-top"></span> Přidat položku
+                        </button>
+                    </p>
+
+                    <script type="text/html" id="od-amh-item-template">
+                        <?php $this->render_bar_item_row('__INDEX__', null, $roles, $icons); ?>
+                    </script>
+                </div><!-- /tab custom -->
+
                 <?php submit_button('Uložit pro roli ' . $roles[$role]); ?>
             </form>
+
+            <?php $this->render_icon_palette($icons); ?>
         </div>
 
         <style>
@@ -583,6 +1203,46 @@ class OD_Admin_Menu_Hider {
             .od-amh-toggle .dashicons { transition:transform .15s; }
             .od-amh-toggle[aria-expanded="true"] .dashicons { transform:rotate(180deg); }
             .od-amh-placeholder { border:1px dashed #8c8f94; border-radius:6px; background:#f0f6fc; }
+
+            .od-amh-tabs { margin-top:20px; }
+            .od-amh-panel { padding-top:16px; }
+            .od-amh-box {
+                background:#fff; border:1px solid #dcdcde; border-left:4px solid #2271b1;
+                border-radius:4px; padding:12px 16px; margin:0 0 20px; max-width:820px;
+            }
+
+            /* vlastní položky lišty */
+            .od-amh-item-row {
+                display:flex; align-items:flex-start; gap:8px; max-width:980px;
+                background:#fff; border:1px solid #dcdcde; border-radius:6px;
+                padding:10px 12px; margin:0 0 8px;
+            }
+            .od-amh-item-grip { cursor:move; margin-top:6px; }
+            .od-amh-item-fields { flex:1 1 auto; min-width:0; }
+            .od-amh-item-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+            .od-amh-item-title { flex:0 1 220px; }
+            .od-amh-item-url { flex:1 1 300px; }
+            .od-amh-item-remove { color:#b32d2e; text-decoration:none; line-height:1; margin-left:auto; }
+            .od-amh-item-meta { margin-top:8px; font-size:12px; color:#50575e; }
+            .od-amh-roles { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+            .od-amh-roles label { display:inline-flex; align-items:center; gap:3px; }
+
+            /* výběr ikony */
+            .od-amh-icon-field { display:inline-flex; position:relative; }
+            .od-amh-icon-btn { display:inline-flex !important; align-items:center; gap:4px; }
+            .od-amh-icon-name { font-size:11px; color:#646970; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+            #od-amh-icon-pop {
+                position:absolute; z-index:9999; width:290px; padding:10px;
+                background:#fff; border:1px solid #c3c4c7; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.15);
+            }
+            #od-amh-icon-search { width:100%; margin-bottom:8px; }
+            .od-amh-icon-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:2px; max-height:260px; overflow:auto; }
+            .od-amh-icon-opt {
+                display:flex; align-items:center; justify-content:center;
+                width:32px; height:32px; padding:0; cursor:pointer;
+                background:none; border:1px solid transparent; border-radius:4px;
+            }
+            .od-amh-icon-opt:hover { background:#f0f6fc; border-color:#2271b1; }
         </style>
 
         <script>
@@ -634,6 +1294,120 @@ class OD_Admin_Menu_Hider {
             });
 
             collect();
+        });
+
+        jQuery(function ($) {
+
+            /* ---------- záložky ---------- */
+            var $tabs = $('.od-amh-tabs .nav-tab');
+
+            $tabs.on('click', function (e) {
+                e.preventDefault();
+                var target = $(this).attr('href');
+                $tabs.removeClass('nav-tab-active');
+                $(this).addClass('nav-tab-active');
+                $('.od-amh-panel').prop('hidden', true);
+                $(target).prop('hidden', false);
+                try { window.localStorage.setItem('odAmhTab', target); } catch (err) {}
+            });
+
+            try {
+                var saved = window.localStorage.getItem('odAmhTab');
+                if (saved && $(saved).length) {
+                    $tabs.filter('[href="' + saved + '"]').trigger('click');
+                }
+            } catch (err) {}
+
+            /* ---------- výběr ikony ---------- */
+            var $pop    = $('#od-amh-icon-pop');
+            var $search = $('#od-amh-icon-search');
+            var $field  = null;
+
+            function closePop() {
+                if ($pop.prop('hidden')) { return; }
+                $pop.prop('hidden', true).appendTo('.wrap');
+                $field = null;
+            }
+
+            $(document).on('click', '.od-amh-icon-btn', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var $this = $(this);
+                var $new  = $this.closest('.od-amh-icon-field');
+
+                if ($field && $field.is($new) && !$pop.prop('hidden')) { closePop(); return; }
+
+                $field = $new;
+                $pop.appendTo($field).prop('hidden', false).css({ top: $this.outerHeight() + 4, left: 0 });
+                $search.val('').trigger('input').trigger('focus');
+            });
+
+            $search.on('input', function () {
+                var q = $.trim($(this).val()).toLowerCase();
+                $pop.find('.od-amh-icon-opt').each(function () {
+                    var icon = $(this).attr('data-icon') || '';
+                    $(this).toggle(!q || icon.indexOf(q) !== -1);
+                });
+            }).on('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); }   // ať se neodešle formulář
+                if (e.key === 'Escape') { closePop(); }
+            });
+
+            $pop.on('click', function (e) { e.stopPropagation(); });
+
+            $pop.on('click', '.od-amh-icon-opt', function (e) {
+                e.preventDefault();
+                if (!$field) { return; }
+                var icon = $(this).attr('data-icon') || '';
+                $field.find('.od-amh-icon-input').val(icon);
+                $field.find('.od-amh-icon-btn .dashicons').attr('class', 'dashicons ' + (icon || 'dashicons-plus-alt2'));
+                $field.find('.od-amh-icon-name').text(icon || 'vybrat');
+                closePop();
+            });
+
+            $(document).on('click', closePop);
+
+            /* ---------- vlastní položky lišty ---------- */
+            var $items = $('#od-amh-bar-items');
+            var $order = $('#od-amh-bar-order');
+            if (!$items.length) { return; }
+
+            var counter = 0;
+
+            function collectBar() {
+                var keys = [];
+                $items.children('.od-amh-item-row').each(function () {
+                    keys.push($(this).attr('data-key'));
+                });
+                $order.val(JSON.stringify(keys));
+            }
+
+            $('#od-amh-add-item').on('click', function () {
+                var tpl  = $('#od-amh-item-template').html() || '';
+                var html = tpl.replace(/__INDEX__/g, 'new' + (counter++));
+                $items.append(html);
+                $items.children('.od-amh-item-row').last().find('.od-amh-item-title').trigger('focus');
+                collectBar();
+            });
+
+            $items.on('click', '.od-amh-item-remove', function () {
+                closePop();   // kdyby byla nabídka ikon otevřená právě v mazaném řádku
+                $(this).closest('.od-amh-item-row').remove();
+                collectBar();
+            });
+
+            if ($.fn.sortable) {
+                $items.sortable({
+                    axis: 'y',
+                    items: '> .od-amh-item-row',
+                    handle: '.od-amh-item-grip',
+                    placeholder: 'od-amh-placeholder',
+                    forcePlaceholderSize: true,
+                    update: collectBar
+                });
+            }
+
+            collectBar();
         });
         </script>
         <?php
