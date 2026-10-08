@@ -8,6 +8,7 @@
   Ukládají se globálně do nové volby `od_amh_bar_items`.
 - Nastavení rozděleno do tří záložek: Levé menu, Horní lišta, Vlastní položky lišty.
 - Vizuální náhled: `_nahled/nahled-1.4.0.html`.
+- Nasazeno a ověřeno v provozu 8. 10. 2026.
 
 ## 1.3.0
 - Plugin připraven na GitHub: soukromý repozitář `od-admin-menu-hider`.

@@ -8,8 +8,8 @@ WordPress plugin, který upravuje administraci podle uživatelské role: skrýv�
 - Naposledy hotovo: skrytí celého levého menu per role (i pro admina, s nouzovým parametrem `amh_menu=1`), úpravy horní lišty (skrytí, vlastní název, vlastní ikona) a vlastní položky lišty s výběrem ikony a rolí. Nastavení rozděleno do tří záložek.
 - Rozpracováno: na tomto pluginu nic.
 - Další na řadě: pro tento plugin nezjištěno.
-- Známé chyby: žádné potvrzené. Verze 1.4.0 nebyla spuštěna ve WordPressu ani ověřena PHP lintem (v prostředí není PHP), jen statickou kontrolou závorek, alternativní syntaxe a vnoření HTML + vizuálním náhledem.
-- Pozor: v1.3.0 je potřeba do WP jednou nahrát ručně a doplnit `ODM_GITHUB_TOKEN` do `wp-config.php`; teprve pak funguje tlačítko Aktualizovat.
+- Známé chyby: žádné. Verze 1.4.0 je nasazená na webu a ověřená v provozu (8. 10. 2026). Pozn.: v tomto prostředí není PHP, kód se dá před nasazením ověřit jen staticky.
+- Pozor: aktualizace z GitHubu funguje až od verze nahrané ručně i s `ODM_GITHUB_TOKEN` ve `wp-config.php`.
 
 ## Architektura
 - Hlavní soubor: `od-admin-menu-hider/od-admin-menu-hider.php` (třída `OD_Admin_Menu_Hider`)
