@@ -1,5 +1,9 @@
 # Changelog
 
+## Repozitář (13. 10. 2026)
+- Repozitář `od-admin-menu-hider` přepnut na veřejný, aktualizace ve WordPressu fungují bez `ODM_GITHUB_TOKEN`.
+  Před přepnutím zkontrolována celá historie, žádná hesla ani tokeny. Ostatní pluginy zůstávají soukromé.
+
 ## 1.5.0
 - Horní lišta: seznam položek nově obsahuje i uzly, které WordPress přidává jen na frontendu
   (`site-editor` Upravit web, `customize` Přizpůsobit, `edit` Upravit stránku, `search` Hledat).

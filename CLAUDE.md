@@ -9,7 +9,7 @@ WordPress plugin, který upravuje administraci podle uživatelské role: skrýv�
 - Rozpracováno: na tomto pluginu nic.
 - Další na řadě: ověřit 1.5.0 na webu finance.odmarketing.cz (otevřít jednou frontend, zaškrtnout položky, zkontrolovat, že zmizí).
 - Známé chyby: žádné známé. Pozn.: v tomto prostředí není PHP, kód se dá před nasazením ověřit jen staticky.
-- Pozor: aktualizace z GitHubu funguje až od verze nahrané ručně i s `ODM_GITHUB_TOKEN` ve `wp-config.php`.
+- Repozitář je od 13. 10. 2026 VEŘEJNÝ, aktualizace fungují na všech webech bez tokenu (stačí verze 1.3.0+ s PUC).
 
 ## Architektura
 - Hlavní soubor: `od-admin-menu-hider/od-admin-menu-hider.php` (třída `OD_Admin_Menu_Hider`)
@@ -46,4 +46,5 @@ Klíčové části kódu:
 - Vlastní položky lišty jsou globální (ne per role), role se u nich zaškrtávají jednotlivě. Pořadí řádků se posílá v JSON poli `bar_order`, prázdný název = smazaný řádek.
 - Adresa vlastní položky bez `http` a bez `/` na začátku se bere jako adresa v administraci (`admin_url`), takže stačí napsat `edit.php?post_type=faktura`.
 - Komunikace a texty česky.
-- Aktualizace: soukromý repozitář `https://github.com/ondrejdrapela/od-admin-menu-hider/`, PUC v5.7 ve složce `plugin-update-checker/`, proměnná `$od_admin_menu_hider_updater`, zapnuté release assets. Token jen z konstanty `ODM_GITHUB_TOKEN` ve `wp-config.php`.
+- Aktualizace: VEŘEJNÝ repozitář `https://github.com/ondrejdrapela/od-admin-menu-hider/` (výjimka z pravidla o soukromých repozitářích, schválil uživatel 13. 10. 2026, platí JEN pro tento plugin, ostatní zůstávají soukromé). PUC v5.7 ve složce `plugin-update-checker/`, proměnná `$od_admin_menu_hider_updater`, zapnuté release assets. Token není potřeba; kód ho z `ODM_GITHUB_TOKEN` jen volitelně použije, pokud na webu existuje (zvedá limit dotazů na GitHub).
+- Protože je repozitář veřejný: do kódu, CLAUDE.md, CHANGELOG.md ani commitů nikdy nedávat hesla, tokeny ani citlivé údaje klientů.
