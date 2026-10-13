@@ -4,7 +4,7 @@ Tags: admin, menu, hide, order, role
 Requires at least: 5.0
 Tested up to: 6.8
 Requires PHP: 7.0
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -43,6 +43,10 @@ Poznámky:
 3. V levém menu otevři Skrývač menu, vyber roli, nastav skrytí a pořadí, ulož.
 
 == Changelog ==
+
+= 1.5.0 =
+* Horní lišta: v nastavení jsou nově i položky, které WordPress ukazuje jen na frontendu (Upravit web, Přizpůsobit, Upravit stránku, Hledat) a frontendové položky jiných pluginů.
+* Úpravy lišty se aplikují až těsně před vykreslením, takže zachytí i pozdě přidané položky.
 
 = 1.4.0 =
 * Skrytí celého levého menu pro vybranou roli, včetně nouzového parametru amh_menu=1.

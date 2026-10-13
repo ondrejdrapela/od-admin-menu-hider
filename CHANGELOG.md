@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+- Horní lišta: seznam položek nově obsahuje i uzly, které WordPress přidává jen na frontendu
+  (`site-editor` Upravit web, `customize` Přizpůsobit, `edit` Upravit stránku, `search` Hledat).
+  Jsou označené štítkem „jen na frontendu“.
+- Uzly zachycené při návštěvě frontendu administrátorem se ukládají do nové volby `od_amh_bar_front`
+  (zápis jen při změně, bez autoloadu), takže jdou nastavit i frontendové položky jiných pluginů.
+- Snapshot a úpravy lišty přesunuty z `admin_bar_menu` 9998/9999 na `wp_before_admin_bar_render` 9998/9999,
+  aby zachytily i pozdě přidané uzly (např. Hledat má v jádře prioritu 9999). Vlastní položky zůstávají na `admin_bar_menu` 10000.
+- `uninstall.php` maže i `od_amh_bar_front`.
+- Vizuální náhled: `_nahled/nahled-1.5.0.html`.
+
 ## 1.4.0
 - Skrytí celého levého menu pro vybranou roli (platí i pro administrátora). Obsah se roztáhne na celou šířku.
 - Nouzové zobrazení menu přes parametr `amh_menu=1` v adrese, kdyby sis menu skryl i sobě.

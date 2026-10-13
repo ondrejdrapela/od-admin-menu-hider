@@ -10,3 +10,4 @@ if (!defined('WP_UNINSTALL_PLUGIN')) {
 
 delete_option('od_amh_hidden');
 delete_option('od_amh_bar_items');
+delete_option('od_amh_bar_front');

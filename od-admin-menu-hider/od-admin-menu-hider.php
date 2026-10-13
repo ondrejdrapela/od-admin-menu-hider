@@ -3,7 +3,7 @@
  * Plugin Name: OD Skrývač admin menu
  * Plugin URI:  https://www.odmarketing.cz
  * Description: Skryje vybrané položky levého admin menu a umožňuje měnit pořadí položek i podpoložek. Nastavuje se zvlášť pro každou roli. Nabídku generuje dynamicky podle aktuálního stavu menu.
- * Version:     1.4.0
+ * Version:     1.5.0
  * Author:      OD Marketing
  * Author URI:  https://www.odmarketing.cz
  * License:     GPL-2.0-or-later
@@ -34,6 +34,8 @@ class OD_Admin_Menu_Hider {
 
     const OPTION     = 'od_amh_hidden';
     const OPTION_BAR = 'od_amh_bar_items';
+    /** Uzly horní lišty zachycené při návštěvě frontendu administrátorem. */
+    const OPTION_BAR_FRONT = 'od_amh_bar_front';
     const PAGE_SLUG  = 'od-admin-menu-hider';
     const NONCE      = 'od_amh_save';
 
@@ -70,12 +72,14 @@ class OD_Admin_Menu_Hider {
         add_filter('menu_order', array($this, 'apply_custom_order'));
 
         // Horní lišta:
-        // 9998  -> snapshot všech uzlů (ještě nic není skryté ani přepsané)
-        // 9999  -> skrytí, přejmenování a vlastní ikony
-        // 10000 -> vlastní položky
-        add_action('admin_bar_menu', array($this, 'take_bar_snapshot'), 9998);
-        add_action('admin_bar_menu', array($this, 'apply_bar_changes'), 9999);
+        // admin_bar_menu 10000          -> vlastní položky
+        // wp_before_admin_bar_render 9998 -> snapshot všech uzlů (ještě nic není skryté ani přepsané)
+        // wp_before_admin_bar_render 9999 -> skrytí, přejmenování a vlastní ikony
+        // Snapshot a úpravy běží až těsně před vykreslením, aby zachytily i uzly,
+        // které jádro nebo jiné pluginy přidávají pozdě (např. Hledat na frontendu, priorita 9999).
         add_action('admin_bar_menu', array($this, 'apply_bar_custom_items'), 10000);
+        add_action('wp_before_admin_bar_render', array($this, 'take_bar_snapshot'), 9998);
+        add_action('wp_before_admin_bar_render', array($this, 'apply_bar_changes'), 9999);
 
         // CSS pro skryté levé menu a pro vlastní ikony v liště
         add_action('admin_head', array($this, 'print_front_styles'));
@@ -349,9 +353,61 @@ class OD_Admin_Menu_Hider {
      * ------------------------------------------------------------------- */
 
     /** Snapshot uzlů lišty ještě předtím, než do nich sáhneme. */
-    public function take_bar_snapshot($wp_admin_bar) {
+    public function take_bar_snapshot() {
+        global $wp_admin_bar;
+        if (!is_object($wp_admin_bar)) {
+            return;
+        }
         $nodes = $wp_admin_bar->get_nodes();
-        $this->snapshot_bar = is_array($nodes) ? $nodes : array();
+        $nodes = is_array($nodes) ? $nodes : array();
+
+        // Naše vlastní položky do seznamu k úpravám nepatří.
+        foreach (array_keys($nodes) as $id) {
+            if (0 === strpos((string) $id, 'odbar-')) {
+                unset($nodes[$id]);
+            }
+        }
+        $this->snapshot_bar = $nodes;
+
+        if (!is_admin() && current_user_can('manage_options')) {
+            $this->remember_front_nodes($nodes);
+        }
+    }
+
+    /**
+     * Zapamatuje si uzly lišty z frontendu, aby šly nastavit i v administraci,
+     * kde je WordPress vůbec nevytváří. Do databáze zapisuje jen při změně.
+     */
+    private function remember_front_nodes(array $nodes) {
+        $data = array();
+        foreach ($nodes as $id => $node) {
+            $data[(string) $id] = array(
+                'title'  => $this->bar_node_title($node, $id),
+                'parent' => isset($node->parent) ? (string) $node->parent : '',
+                'group'  => !empty($node->group),
+            );
+            if (count($data) >= 300) {
+                break;
+            }
+        }
+
+        $stored = get_option(self::OPTION_BAR_FRONT, array());
+        if ($stored !== $data) {
+            update_option(self::OPTION_BAR_FRONT, $data, false);
+        }
+    }
+
+    /**
+     * Známé uzly jádra WP, které existují jen na frontendu.
+     * Názvy jsou pevné, protože třeba "Upravit stránku" se mění podle typu obsahu.
+     */
+    private function known_front_nodes() {
+        return array(
+            'site-editor' => array('title' => 'Upravit web', 'parent' => '', 'group' => false),
+            'customize'   => array('title' => 'Přizpůsobit', 'parent' => '', 'group' => false),
+            'edit'        => array('title' => 'Upravit stránku / příspěvek', 'parent' => '', 'group' => false),
+            'search'      => array('title' => 'Hledat', 'parent' => 'top-secondary', 'group' => false),
+        );
     }
 
     /** Složí obsah položky lišty z ikony a názvu. */
@@ -365,7 +421,12 @@ class OD_Admin_Menu_Hider {
     }
 
     /** Skrytí uzlů a přepsání jejich názvů či ikon. */
-    public function apply_bar_changes($wp_admin_bar) {
+    public function apply_bar_changes() {
+        global $wp_admin_bar;
+        if (!is_object($wp_admin_bar)) {
+            return;
+        }
+
         foreach ($this->get_effective_bar_hidden() as $node_id) {
             $wp_admin_bar->remove_node($node_id);
         }
@@ -728,25 +789,66 @@ class OD_Admin_Menu_Hider {
     }
 
     /**
-     * Uzly horní lišty ze snapshotu jako ploché pole id => ['title'=>..., 'depth'=>...].
+     * Uzly horní lišty jako ploché pole id => ['title'=>..., 'depth'=>..., 'front'=>bool].
+     * Základ je snapshot z administrace, doplněný o uzly, které existují jen na frontendu
+     * (zapamatované z návštěvy webu + pevný seznam známých uzlů jádra).
      * Skupiny (neviditelné obaly) přeskakujeme, jejich děti napojíme o úroveň výš.
      */
     private function bar_nodes() {
+        $all   = array();
+        $front = array();
+
+        foreach ($this->snapshot_bar as $id => $node) {
+            $all[(string) $id] = array(
+                'title'  => $this->bar_node_title($node, $id),
+                'parent' => isset($node->parent) ? (string) $node->parent : '',
+                'group'  => !empty($node->group),
+            );
+        }
+
+        $stored = get_option(self::OPTION_BAR_FRONT, array());
+        $stored = is_array($stored) ? $stored : array();
+        $known  = $this->known_front_nodes();
+
+        foreach (array($stored, $known) as $source) {
+            foreach ($source as $id => $node) {
+                $id = (string) $id;
+                if (isset($all[$id]) && !isset($front[$id])) {
+                    continue; // existuje i v administraci, nejde o čistě frontendový uzel
+                }
+                if (!is_array($node) || 0 === strpos($id, 'odbar-')) {
+                    continue;
+                }
+                $all[$id] = array(
+                    'title'  => isset($node['title']) && '' !== $node['title'] ? (string) $node['title'] : $id,
+                    'parent' => isset($node['parent']) ? (string) $node['parent'] : '',
+                    'group'  => !empty($node['group']),
+                );
+                $front[$id] = true;
+            }
+        }
+        // Známé uzly mají přednost s pevným názvem (např. Hledat má v liště místo názvu formulář).
+        foreach ($known as $id => $node) {
+            if (isset($front[$id])) {
+                $all[$id]['title'] = $node['title'];
+            }
+        }
+
         $children = array();
         $groups   = array();
 
-        foreach ($this->snapshot_bar as $id => $node) {
-            if (!empty($node->group)) {
+        foreach ($all as $id => $node) {
+            if ($node['group']) {
                 $groups[$id] = true;
             }
         }
 
-        foreach ($this->snapshot_bar as $id => $node) {
-            $parent = isset($node->parent) ? (string) $node->parent : '';
+        foreach ($all as $id => $node) {
+            $parent = $node['parent'];
             // Skupinu přeskočíme a dítě pověsíme na jejího rodiče.
             $guard = 0;
             while ('' !== $parent && isset($groups[$parent]) && $guard < 10) {
-                $parent = isset($this->snapshot_bar[$parent]->parent) ? (string) $this->snapshot_bar[$parent]->parent : '';
+                $parent = isset($all[$parent]) ? $all[$parent]['parent'] : '';
                 $guard++;
             }
             if (isset($groups[$id])) {
@@ -757,20 +859,20 @@ class OD_Admin_Menu_Hider {
 
         $out = array();
         // Položky nejvyšší úrovně mají rodiče buď prázdného, nebo explicitně 'root'.
-        $this->walk_bar_nodes($children, '', 0, $out);
-        $this->walk_bar_nodes($children, 'root', 0, $out);
+        $this->walk_bar_nodes($all, $front, $children, '', 0, $out);
+        $this->walk_bar_nodes($all, $front, $children, 'root', 0, $out);
 
         // Uzly, na které se přes strom nedostaneme (osiřelý rodič), doplníme na konec.
-        foreach ($this->snapshot_bar as $id => $node) {
+        foreach ($all as $id => $node) {
             if (!isset($groups[$id]) && !isset($out[$id])) {
-                $out[$id] = array('title' => $this->bar_node_title($node, $id), 'depth' => 0);
+                $out[$id] = array('title' => $node['title'], 'depth' => 0, 'front' => isset($front[$id]));
             }
         }
 
         return $out;
     }
 
-    private function walk_bar_nodes(array $children, $parent, $depth, array &$out) {
+    private function walk_bar_nodes(array $all, array $front, array $children, $parent, $depth, array &$out) {
         if (empty($children[$parent]) || $depth > 4) {
             return;
         }
@@ -779,10 +881,11 @@ class OD_Admin_Menu_Hider {
                 continue;
             }
             $out[$id] = array(
-                'title' => $this->bar_node_title($this->snapshot_bar[$id], $id),
+                'title' => $all[$id]['title'],
                 'depth' => $depth,
+                'front' => isset($front[$id]),
             );
-            $this->walk_bar_nodes($children, $id, $depth + 1, $out);
+            $this->walk_bar_nodes($all, $front, $children, $id, $depth + 1, $out);
         }
     }
 
@@ -1109,14 +1212,21 @@ class OD_Admin_Menu_Hider {
                         Zaškrtnutím položku skryješ. Vyplněný název přepíše původní, prázdné pole nechá původní.
                         Vlastní ikona nahradí tu původní.
                     </p>
+                    <p class="description" style="max-width:820px;margin-bottom:12px">
+                        Položky označené <span class="od-amh-front-tag">jen na frontendu</span> WordPress zobrazuje
+                        jen při prohlížení webu (např. Upravit web, Přizpůsobit, Upravit stránku). Aby se tu objevily
+                        i takové položky z jiných pluginů, otevři si jednou jako administrátor web a tuto stránku načti znovu.
+                    </p>
 
-                    <?php if (!$bar_nodes) : ?>
+                    <?php if (!$this->snapshot_bar) : ?>
                         <div class="notice notice-warning inline"><p>
-                            Horní lišta se teď nevykresluje, takže není co vypsat. Zapni si ji v
+                            Horní lišta se teď nevykresluje, takže chybí položky z administrace. Zapni si ji v
                             <a href="<?php echo esc_url(admin_url('profile.php')); ?>">svém profilu</a>
                             (Zobrazovat panel nástrojů při prohlížení webu) a stránku načti znovu.
                         </p></div>
-                    <?php else : ?>
+                    <?php endif; ?>
+
+                    <?php if ($bar_nodes) : ?>
                         <table class="widefat striped">
                             <thead>
                                 <tr>
@@ -1137,6 +1247,9 @@ class OD_Admin_Menu_Hider {
                                     <td style="padding-left:<?php echo (int) (12 + $node['depth'] * 24); ?>px">
                                         <?php if ($node['depth'] > 0) : ?>&#8627; <?php endif; ?>
                                         <?php echo esc_html($node['title']); ?>
+                                        <?php if (!empty($node['front'])) : ?>
+                                            <span class="od-amh-front-tag">jen na frontendu</span>
+                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <input type="text" class="regular-text" style="width:100%"
@@ -1205,6 +1318,10 @@ class OD_Admin_Menu_Hider {
             .od-amh-placeholder { border:1px dashed #8c8f94; border-radius:6px; background:#f0f6fc; }
 
             .od-amh-tabs { margin-top:20px; }
+            .od-amh-front-tag {
+                display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px;
+                background:#f1efe8; color:#50575e; font-size:11px; line-height:18px; vertical-align:middle;
+            }
             .od-amh-panel { padding-top:16px; }
             .od-amh-box {
                 background:#fff; border:1px solid #dcdcde; border-left:4px solid #2271b1;
