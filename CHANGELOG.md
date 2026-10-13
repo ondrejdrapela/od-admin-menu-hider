@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0
+- Redesign administrace podle Finance (3.0.0) a Systému Soulado: na stránce pluginu se skryje lišta, levé menu
+  i patička WP, místo nich rám s bočním menu (Levé menu, Horní lišta, Vlastní položky lišty jako sekce bez načtení stránky).
+- Dole v bočním menu Zkontrolovat aktualizace (`admin_post_od_amh_check_update`) a aktualizace na pozadí přes AJAX `update-plugin`,
+  Zpět do WordPressu, uživatel s odhlášením a verze. Po klasické aktualizaci odkaz Zpět do Skrývače menu.
+- Výběr role jako pilulky (odkazy), tlačítko Uložit v hlavičce, štítek Nastavení uloženo.
+- Karty, tabulky, vlastní zaškrtávátka, přepínač Skrýt celé levé menu, role u vlastních položek jako pilulky.
+  Skryté položky se přeškrtnou (CSS `:has`).
+- Styly a skripty přesunuty do `assets/admin.css` a `assets/admin.js`, písma Sora a Plus Jakarta Sans lokálně v `assets/fonts/`.
+- Názvy rolí přes `translate_user_role` (česky).
+- Konstanta `VERSION`. Ověřeno ve WordPress Playground (uložení, sekce, ikony, vlastní položky, skrytí na frontendu, mobil, kontrola aktualizací).
+- Náhled: `_nahled/redesign-2.0.0.html`.
+
 ## Repozitář (13. 10. 2026)
 - Repozitář `od-admin-menu-hider` přepnut na veřejný, aktualizace ve WordPressu fungují bez `ODM_GITHUB_TOKEN`.
   Před přepnutím zkontrolována celá historie, žádná hesla ani tokeny. Ostatní pluginy zůstávají soukromé.

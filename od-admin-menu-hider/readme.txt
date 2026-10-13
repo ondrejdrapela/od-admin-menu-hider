@@ -4,7 +4,7 @@ Tags: admin, menu, hide, order, role
 Requires at least: 5.0
 Tested up to: 6.8
 Requires PHP: 7.0
-Stable tag: 1.5.0
+Stable tag: 2.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -43,6 +43,12 @@ Poznámky:
 3. V levém menu otevři Skrývač menu, vyber roli, nastav skrytí a pořadí, ulož.
 
 == Changelog ==
+
+= 2.0.0 =
+* Nový vzhled administrace stejný jako Finance a Systém Soulado: boční menu se sekcemi, výběr role pilulkami, karty a vlastní zaškrtávátka.
+* Tlačítko Uložit je nahoře, skryté položky jsou přeškrtnuté.
+* V bočním menu jde zkontrolovat a nainstalovat aktualizaci pluginu na pozadí.
+* Názvy rolí jsou přeložené do češtiny.
 
 = 1.5.0 =
 * Horní lišta: v nastavení jsou nově i položky, které WordPress ukazuje jen na frontendu (Upravit web, Přizpůsobit, Upravit stránku, Hledat) a frontendové položky jiných pluginů.

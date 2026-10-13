@@ -2,8 +2,8 @@
 /**
  * Plugin Name: OD Skrývač admin menu
  * Plugin URI:  https://www.odmarketing.cz
- * Description: Skryje vybrané položky levého admin menu a umožňuje měnit pořadí položek i podpoložek. Nastavuje se zvlášť pro každou roli. Nabídku generuje dynamicky podle aktuálního stavu menu.
- * Version:     1.5.0
+ * Description: Skryje vybrané položky levého admin menu a horní lišty, mění jejich pořadí, názvy a ikony a přidává vlastní položky lišty. Nastavuje se zvlášť pro každou roli.
+ * Version:     2.0.0
  * Author:      OD Marketing
  * Author URI:  https://www.odmarketing.cz
  * License:     GPL-2.0-or-later
@@ -32,6 +32,7 @@ if (defined('ODM_GITHUB_TOKEN')) {
 
 class OD_Admin_Menu_Hider {
 
+    const VERSION    = '2.0.0';
     const OPTION     = 'od_amh_hidden';
     const OPTION_BAR = 'od_amh_bar_items';
     /** Uzly horní lišty zachycené při návštěvě frontendu administrátorem. */
@@ -87,6 +88,12 @@ class OD_Admin_Menu_Hider {
 
         // Odkaz na nastavení v seznamu pluginů
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'action_links'));
+
+        // Rám stránky pluginu (2.0.0): boční menu jako Finance a Systém Soulado, bez lišty a menu WP
+        add_filter('admin_body_class', array($this, 'shell_body_class'));
+        add_action('admin_head', array($this, 'shell_admin_head'));
+        add_action('admin_post_od_amh_check_update', array($this, 'handle_check_update'));
+        add_filter('update_plugin_complete_actions', array($this, 'update_complete_actions'), 10, 2);
     }
 
     /* ---------------------------------------------------------------------
@@ -97,7 +104,8 @@ class OD_Admin_Menu_Hider {
         if (!function_exists('wp_roles')) {
             return array();
         }
-        return wp_roles()->get_names();
+        // Názvy rolí přeložené do jazyka webu (Author -> Autor apod.).
+        return array_map('translate_user_role', wp_roles()->get_names());
     }
 
     /** Kompletní uložené nastavení pro všechny role, s migrací staré struktury. */
@@ -553,7 +561,171 @@ class OD_Admin_Menu_Hider {
         if ($hook !== $this->page_hook) {
             return;
         }
-        wp_enqueue_script('jquery-ui-sortable');
+        wp_enqueue_style('od-amh-fonts', plugins_url('assets/fonts/fonts.css', __FILE__), array(), self::VERSION);
+        wp_enqueue_style('od-amh-admin', plugins_url('assets/admin.css', __FILE__), array('dashicons'), self::VERSION);
+        wp_enqueue_script('od-amh-admin', plugins_url('assets/admin.js', __FILE__), array('jquery', 'jquery-ui-sortable'), self::VERSION, true);
+    }
+
+    /* ---------------------------------------------------------------------
+     * Rám stránky pluginu (boční menu)
+     * ------------------------------------------------------------------- */
+
+    /** Je otevřená stránka pluginu? */
+    private function is_our_page() {
+        $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : ''; // phpcs:ignore WordPress.Security.NonceVerification
+        return is_admin() && self::PAGE_SLUG === $page && current_user_can('manage_options');
+    }
+
+    public function shell_body_class($classes) {
+        return $this->is_our_page() ? $classes . ' od-amh-app-page' : $classes;
+    }
+
+    /** WP posouvá stránku kvůli horní liště přímo na <html>, proto inline. */
+    public function shell_admin_head() {
+        if ($this->is_our_page()) {
+            echo '<style id="od-amh-hide-wp-chrome">html.wp-toolbar{padding-top:0!important}</style>' . "\n";
+        }
+    }
+
+    /** Dostupná aktualizace pluginu z PUC, jinak null. */
+    private function available_update() {
+        $updater = isset($GLOBALS['od_admin_menu_hider_updater']) ? $GLOBALS['od_admin_menu_hider_updater'] : null;
+        if (!$updater || !current_user_can('update_plugins')) {
+            return null;
+        }
+        try {
+            $update = $updater->getUpdate();
+        } catch (Throwable $e) {
+            return null;
+        }
+        return ($update && !empty($update->version) && version_compare($update->version, self::VERSION, '>')) ? $update : null;
+    }
+
+    /** „Zkontrolovat aktualizace“: zeptá se GitHubu hned a vrátí se na stránku. */
+    public function handle_check_update() {
+        if (!current_user_can('update_plugins')) {
+            wp_die('Nemáte oprávnění.', 403);
+        }
+        check_admin_referer('od_amh_check_update');
+
+        $found   = null;
+        $updater = isset($GLOBALS['od_admin_menu_hider_updater']) ? $GLOBALS['od_admin_menu_hider_updater'] : null;
+        if ($updater) {
+            try {
+                $found = $updater->checkForUpdates();
+            } catch (Throwable $e) {
+                $found = null;
+            }
+        }
+        $new = $found && !empty($found->version) && version_compare($found->version, self::VERSION, '>');
+        wp_safe_redirect(add_query_arg(
+            array('page' => self::PAGE_SLUG, 'od_amh_upd' => $new ? 'new' : 'latest'),
+            admin_url('admin.php')
+        ));
+        exit;
+    }
+
+    /** Po klasické aktualizaci přes stránku WP nabídne cestu zpět do pluginu. */
+    public function update_complete_actions($actions, $plugin) {
+        if (plugin_basename(__FILE__) === $plugin) {
+            $actions = array(
+                'od_amh_back' => '<a href="' . esc_url(admin_url('admin.php?page=' . self::PAGE_SLUG)) . '"><strong>Zpět do Skrývače menu</strong></a>',
+            ) + (array) $actions;
+        }
+        return $actions;
+    }
+
+    /** Ikony bočního menu (stejný styl čar jako Finance a Soulado). */
+    private function shell_svg($key) {
+        $icons = array(
+            'menu'   => '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+            'bar'    => '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
+            'custom' => '<path d="M12 5v14M5 12h14"/>',
+            'back'   => '<path d="M15 18l-6-6 6-6"/>',
+            'update' => '<path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/>',
+            'burger' => '<path d="M4 7h16M4 12h16M4 17h16"/>',
+        );
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            . (isset($icons[$key]) ? $icons[$key] : '') . '</svg>';
+    }
+
+    /** Boční menu. Sekce se přepínají v prohlížeči, bez načtení stránky. */
+    private function render_sidebar($custom_count) {
+        $user  = wp_get_current_user();
+        $name  = $user->display_name;
+        $ini   = function_exists('mb_substr') ? mb_strtoupper(mb_substr($name, 0, 2)) : strtoupper(substr($name, 0, 2));
+        $home  = admin_url('admin.php?page=' . self::PAGE_SLUG);
+        $brand = '<b>OD MARKETING</b><span>skrývač menu</span>';
+        $tabs  = array(
+            'menu'   => 'Levé menu',
+            'bar'    => 'Horní lišta',
+            'custom' => 'Vlastní položky lišty',
+        );
+        ?>
+        <input type="checkbox" id="od-amh-sb-toggle" class="od-amh-sb-toggle" hidden>
+        <div class="od-amh-mtop">
+            <label for="od-amh-sb-toggle" class="od-amh-mtop-btn" aria-label="Menu"><?php echo $this->shell_svg('burger'); // phpcs:ignore WordPress.Security.EscapeOutput ?></label>
+            <a href="<?php echo esc_url($home); ?>" class="od-amh-mtop-brand"><?php echo $brand; // phpcs:ignore WordPress.Security.EscapeOutput ?></a>
+        </div>
+        <label for="od-amh-sb-toggle" class="od-amh-sb-backdrop" aria-hidden="true"></label>
+
+        <aside class="od-amh-sb" aria-label="Menu Skrývače">
+            <a class="od-amh-sb-logo" href="<?php echo esc_url($home); ?>"><?php echo $brand; // phpcs:ignore WordPress.Security.EscapeOutput ?></a>
+            <nav class="od-amh-sb-nav">
+                <?php foreach ($tabs as $key => $label) : ?>
+                    <a href="#od-amh-tab-<?php echo esc_attr($key); ?>" data-tab="<?php echo esc_attr($key); ?>"
+                       data-title="<?php echo esc_attr($label); ?>"<?php echo 'menu' === $key ? ' class="is-active" aria-current="page"' : ''; ?>>
+                        <?php echo $this->shell_svg($key); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+                        <span><?php echo esc_html($label); ?></span>
+                        <?php if ('custom' === $key) : ?>
+                            <span class="od-amh-sb-count" id="od-amh-custom-count"<?php echo $custom_count ? '' : ' hidden'; ?>><?php echo (int) $custom_count; ?></span>
+                        <?php endif; ?>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
+
+            <div class="od-amh-sb-bottom">
+                <?php
+                $update = $this->available_update();
+                if ($update) :
+                    $file = plugin_basename(__FILE__);
+                    $href = wp_nonce_url(self_admin_url('update.php?action=upgrade-plugin&plugin=' . rawurlencode($file)), 'upgrade-plugin_' . $file);
+                    ?>
+                    <a class="od-amh-sb-update" id="od-amh-self-update" href="<?php echo esc_url($href); ?>"
+                       data-plugin="<?php echo esc_attr($file); ?>"
+                       data-nonce="<?php echo esc_attr(wp_create_nonce('updates')); ?>"
+                       data-ajax="<?php echo esc_url(admin_url('admin-ajax.php')); ?>"
+                       title="<?php echo esc_attr('Nainstalovaná verze ' . self::VERSION . ', nová ' . $update->version); ?>">
+                        <?php echo $this->shell_svg('update'); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+                        <span>Aktualizovat na <?php echo esc_html($update->version); ?></span>
+                        <span class="od-amh-sb-count is-red">1</span>
+                    </a>
+                <?php elseif (current_user_can('update_plugins')) :
+                    $check  = wp_nonce_url(admin_url('admin-post.php?action=od_amh_check_update'), 'od_amh_check_update');
+                    $latest = isset($_GET['od_amh_upd']) && 'latest' === sanitize_key(wp_unslash($_GET['od_amh_upd'])); // phpcs:ignore WordPress.Security.NonceVerification
+                    ?>
+                    <a href="<?php echo esc_url($check); ?>">
+                        <?php echo $this->shell_svg('update'); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+                        <span><?php echo esc_html($latest ? 'Máte nejnovější verzi ' . self::VERSION : 'Zkontrolovat aktualizace'); ?></span>
+                    </a>
+                <?php endif; ?>
+
+                <a href="<?php echo esc_url(admin_url()); ?>">
+                    <?php echo $this->shell_svg('back'); // phpcs:ignore WordPress.Security.EscapeOutput ?>
+                    <span>Zpět do WordPressu</span>
+                </a>
+
+                <div class="od-amh-sb-user">
+                    <span class="od-amh-sb-ava"><?php echo esc_html($ini); ?></span>
+                    <div>
+                        <strong><?php echo esc_html($name); ?></strong>
+                        <a href="<?php echo esc_url(wp_logout_url()); ?>">Odhlásit</a>
+                    </div>
+                </div>
+                <div class="od-amh-sb-ver">v<?php echo esc_html(self::VERSION); ?></div>
+            </div>
+        </aside>
+        <?php
     }
 
     private function selected_role() {
@@ -952,9 +1124,9 @@ class OD_Admin_Menu_Hider {
         $value = in_array($value, $icons, true) ? $value : $this->sanitize_icon($value);
         ?>
         <span class="od-amh-icon-field">
-            <button type="button" class="button od-amh-icon-btn">
+            <button type="button" class="od-amh-icon-btn<?php echo $value ? ' has-icon' : ''; ?>">
                 <span class="dashicons <?php echo esc_attr($value ? $value : 'dashicons-plus-alt2'); ?>"></span>
-                <span class="od-amh-icon-name"><?php echo esc_html($value ? $value : 'vybrat'); ?></span>
+                <span class="od-amh-icon-name"><?php echo esc_html($value ? preg_replace('/^dashicons-/', '', $value) : 'vybrat'); ?></span>
             </button>
             <input type="hidden" class="od-amh-icon-input" name="<?php echo esc_attr($name); ?>" value="<?php echo esc_attr($value); ?>">
         </span>
@@ -972,36 +1144,35 @@ class OD_Admin_Menu_Hider {
         $checked = $item ? $item['roles'] : array('administrator');
         ?>
         <div class="od-amh-item-row" data-key="<?php echo esc_attr($index); ?>">
-            <span class="dashicons dashicons-menu od-amh-grip od-amh-item-grip"></span>
+            <span class="dashicons dashicons-menu od-amh-grip od-amh-item-grip" title="Přetáhni pro změnu pořadí"></span>
             <input type="hidden" name="<?php echo esc_attr($base); ?>[id]" value="<?php echo esc_attr($id); ?>">
 
             <div class="od-amh-item-fields">
                 <div class="od-amh-item-line">
                     <?php $this->render_icon_picker($base . '[icon]', $icon, $icons); ?>
                     <input type="text" name="<?php echo esc_attr($base); ?>[title]" value="<?php echo esc_attr($title); ?>"
-                           placeholder="Název (např. Faktury)" class="od-amh-item-title">
+                           placeholder="Název (např. Faktury)" class="od-amh-inp od-amh-item-title">
                     <input type="text" name="<?php echo esc_attr($base); ?>[url]" value="<?php echo esc_attr($url); ?>"
-                           placeholder="Adresa (např. edit.php?post_type=faktura)" class="od-amh-item-url">
-                    <button type="button" class="button-link od-amh-item-remove" title="Odebrat položku">
+                           placeholder="Adresa (např. edit.php?post_type=faktura)" class="od-amh-inp od-amh-item-url">
+                    <button type="button" class="od-amh-item-remove" title="Odebrat položku" aria-label="Odebrat položku">
                         <span class="dashicons dashicons-trash"></span>
                     </button>
                 </div>
 
-                <div class="od-amh-item-line od-amh-item-meta">
-                    <label>
-                        <input type="checkbox" name="<?php echo esc_attr($base); ?>[new_tab]" value="1" <?php checked($new_tab); ?>>
+                <div class="od-amh-item-meta">
+                    <span>Zobrazit rolím:</span>
+                    <?php foreach ($roles as $key => $name) : ?>
+                        <label class="od-amh-pill">
+                            <input type="checkbox" name="<?php echo esc_attr($base); ?>[roles][]"
+                                   value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $checked, true)); ?>>
+                            <?php echo esc_html($name); ?>
+                        </label>
+                    <?php endforeach; ?>
+                    <span class="od-amh-sp"></span>
+                    <label class="od-amh-check-label">
+                        <input type="checkbox" class="od-amh-chk" name="<?php echo esc_attr($base); ?>[new_tab]" value="1" <?php checked($new_tab); ?>>
                         otevřít v novém okně
                     </label>
-                    <span class="od-amh-roles">
-                        <strong>Zobrazit rolím:</strong>
-                        <?php foreach ($roles as $key => $name) : ?>
-                            <label>
-                                <input type="checkbox" name="<?php echo esc_attr($base); ?>[roles][]"
-                                       value="<?php echo esc_attr($key); ?>" <?php checked(in_array($key, $checked, true)); ?>>
-                                <?php echo esc_html($name); ?>
-                            </label>
-                        <?php endforeach; ?>
-                    </span>
                 </div>
             </div>
         </div>
@@ -1066,467 +1237,259 @@ class OD_Admin_Menu_Hider {
                 $json['sub'][$slug] = $ordered_sub;
             }
         }
+        $bar_hidden_count = 0;
+        foreach (array_keys($bar_nodes) as $node_id) {
+            if (isset($bar_hidden[$node_id])) {
+                $bar_hidden_count++;
+            }
+        }
         ?>
-        <div class="wrap">
-            <h1>Skrývač admin menu</h1>
+        <div class="od-amh-app" id="od-amh-app">
+            <?php $this->render_sidebar(count($bar_items)); ?>
 
-            <?php if (!empty($_GET['updated'])) : ?>
-                <div class="notice notice-success is-dismissible"><p>Nastavení uloženo.</p></div>
-            <?php endif; ?>
-
-            <p style="max-width:820px">
-                Nastavení se ukládá zvlášť pro každou roli. Vyber roli a pak uprav levé menu i horní lištu.
-                Změny se projeví uživatelům s danou rolí, u sebe je uvidíš podle své vlastní role.
-                Skrytí je pouze vizuální, stránka zůstane dostupná přes přímou URL.
-            </p>
-
-            <form method="get" style="margin:16px 0">
-                <input type="hidden" name="page" value="<?php echo esc_attr(self::PAGE_SLUG); ?>">
-                <label for="amh_role"><strong>Role:</strong></label>
-                <select name="amh_role" id="amh_role" onchange="this.form.submit()">
-                    <?php foreach ($roles as $key => $name) : ?>
-                        <option value="<?php echo esc_attr($key); ?>" <?php selected($key, $role); ?>>
-                            <?php echo esc_html($name); ?> (<?php echo esc_html($key); ?>)
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-                <noscript><button type="submit" class="button">Zobrazit</button></noscript>
-            </form>
-
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <main class="od-amh-main">
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" id="od-amh-form">
                 <input type="hidden" name="action" value="<?php echo esc_attr(self::NONCE); ?>">
                 <input type="hidden" name="amh_role" value="<?php echo esc_attr($role); ?>">
                 <input type="hidden" name="order_data" id="od-amh-order" value="<?php echo esc_attr(wp_json_encode($json)); ?>">
                 <input type="hidden" name="bar_order" id="od-amh-bar-order" value="">
                 <?php wp_nonce_field(self::NONCE); ?>
 
-                <h2 class="nav-tab-wrapper od-amh-tabs">
-                    <a href="#od-amh-tab-menu" class="nav-tab nav-tab-active">Levé menu</a>
-                    <a href="#od-amh-tab-bar" class="nav-tab">Horní lišta</a>
-                    <a href="#od-amh-tab-custom" class="nav-tab">Vlastní položky lišty</a>
-                </h2>
-
-                <!-- ============ Záložka 1: levé menu ============ -->
-                <div id="od-amh-tab-menu" class="od-amh-panel">
-
-                    <div class="od-amh-box">
-                        <label>
-                            <input type="checkbox" name="hide_menu" value="1" <?php checked($settings['hide_menu']); ?>>
-                            <strong>Skrýt celé levé menu</strong>
-                        </label>
-                        <p class="description" style="margin:8px 0 0">
-                            Levé menu zmizí i s místem po něm, obsah se roztáhne na celou šířku.
-                            Platí i pro administrátora, takže si ho můžeš skrýt i sám sobě.
-                            Kdyby ses potřeboval k menu dostat, přidej do adresy
-                            <code>&amp;<?php echo esc_html(self::ESCAPE_ARG); ?>=1</code> &ndash; menu se na té stránce dočasně objeví.
-                            Záchranná adresa na toto nastavení:<br>
-                            <code><?php echo esc_html(admin_url('admin.php?page=' . self::PAGE_SLUG . '&' . self::ESCAPE_ARG . '=1')); ?></code>
-                        </p>
+                <div class="od-amh-head">
+                    <div>
+                        <div class="od-amh-eyebrow">Skrývač menu</div>
+                        <h1 id="od-amh-title">Levé menu</h1>
                     </div>
+                    <div class="od-amh-sp"></div>
+                    <?php if (!empty($_GET['updated'])) : // phpcs:ignore WordPress.Security.NonceVerification ?>
+                        <span class="od-amh-saved">&#10003; Nastavení uloženo</span>
+                    <?php endif; ?>
+                    <button type="submit" class="od-amh-btn is-primary">Uložit pro roli <?php echo esc_html($roles[$role]); ?></button>
+                </div>
+                <hr class="wp-header-end" hidden>
 
-                <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
-
-                    <!-- Sekce 1: skrývání -->
-                    <div style="flex:1 1 460px;min-width:420px">
-                        <h2>Skrýt položky</h2>
-                        <table class="widefat striped">
-                            <thead>
-                                <tr>
-                                    <th style="width:50px">Skrýt</th>
-                                    <th>Položka menu</th>
-                                    <th>Slug</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            <?php foreach ($ordered_top as $slug) :
-                                $is_self = ($slug === self::PAGE_SLUG); ?>
-                                <tr>
-                                    <td>
-                                        <?php if ($is_self) : ?>
-                                            <span title="Tuto stránku nelze skrýt" style="color:#999">&ndash;</span>
-                                        <?php else : ?>
-                                            <input type="checkbox" name="hidden_top[]" value="<?php echo esc_attr($slug); ?>" <?php checked(isset($hidden_top[$slug])); ?>>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td><strong><?php echo esc_html($tree[$slug]['title']); ?></strong></td>
-                                    <td><code><?php echo esc_html($slug); ?></code></td>
-                                </tr>
-                                <?php foreach ($tree[$slug]['subs'] as $child_slug) :
-                                    $combo = $slug . '||' . $child_slug; ?>
-                                    <tr>
-                                        <td><input type="checkbox" name="hidden_sub[]" value="<?php echo esc_attr($combo); ?>" <?php checked(isset($hidden_sub[$combo])); ?>></td>
-                                        <td style="padding-left:28px">&#8627; <?php echo esc_html($tree[$slug]['names'][$child_slug]); ?></td>
-                                        <td><code><?php echo esc_html($child_slug); ?></code></td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Sekce 2: pořadí -->
-                    <div style="flex:0 1 420px;min-width:360px">
-                        <h2>Pořadí položek</h2>
-                        <p class="description" style="margin-bottom:12px">
-                            Přetáhni položky do požadovaného pořadí. Podpoložky lze přetahovat jen v rámci
-                            svého rodiče. Kliknutím na šipku rozbalíš podpoložky.
-                        </p>
-
-                        <ul id="od-amh-sortable" class="od-amh-list">
-                            <?php foreach ($ordered_top as $slug) : ?>
-                                <li data-slug="<?php echo esc_attr($slug); ?>" class="od-amh-item">
-                                    <div class="od-amh-row">
-                                        <span class="dashicons dashicons-menu od-amh-grip"></span>
-                                        <span class="od-amh-title"><?php echo esc_html($tree[$slug]['title']); ?></span>
-                                        <code class="od-amh-slug" title="<?php echo esc_attr($slug); ?>"><?php echo esc_html($slug); ?></code>
-                                        <?php if ($tree[$slug]['subs']) : ?>
-                                            <button type="button" class="button-link od-amh-toggle" aria-expanded="false">
-                                                <span class="dashicons dashicons-arrow-down-alt2"></span>
-                                            </button>
-                                        <?php endif; ?>
-                                    </div>
-
-                                    <?php if ($tree[$slug]['subs']) : ?>
-                                        <ul class="od-amh-sub" data-parent="<?php echo esc_attr($slug); ?>" hidden>
-                                            <?php foreach ($tree[$slug]['subs'] as $child_slug) : ?>
-                                                <li data-slug="<?php echo esc_attr($child_slug); ?>" class="od-amh-subitem">
-                                                    <span class="dashicons dashicons-menu od-amh-grip"></span>
-                                                    <span class="od-amh-title"><?php echo esc_html($tree[$slug]['names'][$child_slug]); ?></span>
-                                                    <code class="od-amh-slug" title="<?php echo esc_attr($child_slug); ?>"><?php echo esc_html($child_slug); ?></code>
-                                                </li>
-                                            <?php endforeach; ?>
-                                        </ul>
-                                    <?php endif; ?>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
+                <div class="od-amh-roles-bar">
+                    <span class="od-amh-k">Role</span>
+                    <?php foreach ($roles as $key => $name) : ?>
+                        <a class="od-amh-pill<?php echo $key === $role ? ' is-on' : ''; ?>"
+                           href="<?php echo esc_url(add_query_arg(array('page' => self::PAGE_SLUG, 'amh_role' => $key), admin_url('admin.php'))); ?>"
+                           title="<?php echo esc_attr($key); ?>"<?php echo $key === $role ? ' aria-current="true"' : ''; ?>>
+                            <?php echo esc_html($name); ?>
+                        </a>
+                    <?php endforeach; ?>
                 </div>
 
-                </div><!-- /tab menu -->
+                <!-- ============ Sekce 1: levé menu ============ -->
+                <section id="od-amh-tab-menu" class="od-amh-panel">
 
-                <!-- ============ Záložka 2: horní lišta ============ -->
-                <div id="od-amh-tab-bar" class="od-amh-panel" hidden>
-                    <p class="description" style="max-width:820px;margin-bottom:12px">
-                        Seznam se bere z živé horní lišty, takže obsahuje i položky přidané jinými pluginy.
-                        Zaškrtnutím položku skryješ. Vyplněný název přepíše původní, prázdné pole nechá původní.
-                        Vlastní ikona nahradí tu původní.
-                    </p>
-                    <p class="description" style="max-width:820px;margin-bottom:12px">
-                        Položky označené <span class="od-amh-front-tag">jen na frontendu</span> WordPress zobrazuje
-                        jen při prohlížení webu (např. Upravit web, Přizpůsobit, Upravit stránku). Aby se tu objevily
-                        i takové položky z jiných pluginů, otevři si jednou jako administrátor web a tuto stránku načti znovu.
-                    </p>
-
-                    <?php if (!$this->snapshot_bar) : ?>
-                        <div class="notice notice-warning inline"><p>
-                            Horní lišta se teď nevykresluje, takže chybí položky z administrace. Zapni si ji v
-                            <a href="<?php echo esc_url(admin_url('profile.php')); ?>">svém profilu</a>
-                            (Zobrazovat panel nástrojů při prohlížení webu) a stránku načti znovu.
-                        </p></div>
-                    <?php endif; ?>
-
-                    <?php if ($bar_nodes) : ?>
-                        <table class="widefat striped">
-                            <thead>
-                                <tr>
-                                    <th style="width:50px">Skrýt</th>
-                                    <th>Položka lišty</th>
-                                    <th style="width:220px">Vlastní název</th>
-                                    <th style="width:200px">Vlastní ikona</th>
-                                    <th style="width:160px">ID</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            <?php foreach ($bar_nodes as $node_id => $node) :
-                                $edit  = isset($settings['bar_edit'][$node_id]) ? (array) $settings['bar_edit'][$node_id] : array();
-                                $e_tit = isset($edit['title']) ? $edit['title'] : '';
-                                $e_ico = isset($edit['icon']) ? $edit['icon'] : ''; ?>
-                                <tr>
-                                    <td><input type="checkbox" name="bar_hidden[]" value="<?php echo esc_attr($node_id); ?>" <?php checked(isset($bar_hidden[$node_id])); ?>></td>
-                                    <td style="padding-left:<?php echo (int) (12 + $node['depth'] * 24); ?>px">
-                                        <?php if ($node['depth'] > 0) : ?>&#8627; <?php endif; ?>
-                                        <?php echo esc_html($node['title']); ?>
-                                        <?php if (!empty($node['front'])) : ?>
-                                            <span class="od-amh-front-tag">jen na frontendu</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <input type="text" class="regular-text" style="width:100%"
-                                               name="bar_edit[<?php echo esc_attr($node_id); ?>][title]"
-                                               value="<?php echo esc_attr($e_tit); ?>" placeholder="ponechat původní">
-                                    </td>
-                                    <td><?php $this->render_icon_picker('bar_edit[' . $node_id . '][icon]', $e_ico, $icons); ?></td>
-                                    <td><code style="font-size:11px"><?php echo esc_html($node_id); ?></code></td>
-                                </tr>
-                            <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    <?php endif; ?>
-                </div><!-- /tab bar -->
-
-                <!-- ============ Záložka 3: vlastní položky lišty ============ -->
-                <div id="od-amh-tab-custom" class="od-amh-panel" hidden>
-                    <p class="description" style="max-width:820px;margin-bottom:12px">
-                        Vlastní položky platí pro celý web, u každé si zaškrtneš role, kterým se má zobrazit
-                        (nejsou tedy vázané na roli vybranou nahoře). Do adresy můžeš napsat celou URL
-                        i jen část pro administraci, například <code>edit.php?post_type=faktura</code>.
-                        Pořadí změníš přetažením za úchyt vlevo. Položku smažeš tlačítkem Odebrat.
-                    </p>
-
-                    <div id="od-amh-bar-items">
-                        <?php foreach ($bar_items as $i => $item) {
-                            $this->render_bar_item_row($i, $item, $roles, $icons);
-                        } ?>
+                    <div class="od-amh-card">
+                        <label class="od-amh-switch">
+                            <input type="checkbox" name="hide_menu" value="1" <?php checked($settings['hide_menu']); ?>>
+                            <span class="od-amh-switch-t"></span>
+                            <span>
+                                <b>Skrýt celé levé menu</b>
+                                <small>
+                                    Levé menu zmizí i s místem po něm, obsah se roztáhne na celou šířku.
+                                    Platí i pro administrátora, takže si ho můžeš skrýt i sám sobě.
+                                    Kdyby ses potřeboval k menu dostat, přidej do adresy
+                                    <code>&amp;<?php echo esc_html(self::ESCAPE_ARG); ?>=1</code>, menu se na té stránce dočasně objeví.
+                                    Záchranná adresa na toto nastavení:
+                                    <code><?php echo esc_html(admin_url('admin.php?page=' . self::PAGE_SLUG . '&' . self::ESCAPE_ARG . '=1')); ?></code>
+                                </small>
+                            </span>
+                        </label>
                     </div>
 
-                    <p>
-                        <button type="button" class="button" id="od-amh-add-item">
-                            <span class="dashicons dashicons-plus-alt2" style="vertical-align:text-top"></span> Přidat položku
-                        </button>
-                    </p>
+                    <div class="od-amh-grid">
+                        <div class="od-amh-card">
+                            <div class="od-amh-ch">
+                                <h2>Skrýt položky</h2>
+                                <span class="od-amh-sub">zaškrtnutá položka se vybrané roli nezobrazí</span>
+                            </div>
+                            <div class="od-amh-table-wrap">
+                                <table class="od-amh-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:44px">Skrýt</th>
+                                            <th>Položka menu</th>
+                                            <th>Slug</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($ordered_top as $slug) :
+                                        $is_self = ($slug === self::PAGE_SLUG); ?>
+                                        <tr class="is-parent">
+                                            <td>
+                                                <?php if ($is_self) : ?>
+                                                    <span class="od-amh-dash" title="Tuto stránku nelze skrýt">&ndash;</span>
+                                                <?php else : ?>
+                                                    <input type="checkbox" class="od-amh-chk" name="hidden_top[]" value="<?php echo esc_attr($slug); ?>" <?php checked(isset($hidden_top[$slug])); ?>>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="od-amh-nm">
+                                                <span class="od-amh-nm-t"><?php echo esc_html($tree[$slug]['title']); ?></span>
+                                                <?php if ($is_self) : ?>
+                                                    <span class="od-amh-tag is-grey">nelze skrýt</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td><code><?php echo esc_html($slug); ?></code></td>
+                                        </tr>
+                                        <?php foreach ($tree[$slug]['subs'] as $child_slug) :
+                                            $combo = $slug . '||' . $child_slug; ?>
+                                            <tr>
+                                                <td><input type="checkbox" class="od-amh-chk" name="hidden_sub[]" value="<?php echo esc_attr($combo); ?>" <?php checked(isset($hidden_sub[$combo])); ?>></td>
+                                                <td class="od-amh-nm" style="padding-left:28px">
+                                                    <span class="od-amh-arrow">&#8627;</span><span class="od-amh-nm-t"><?php echo esc_html($tree[$slug]['names'][$child_slug]); ?></span>
+                                                </td>
+                                                <td><code><?php echo esc_html($child_slug); ?></code></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
 
-                    <script type="text/html" id="od-amh-item-template">
-                        <?php $this->render_bar_item_row('__INDEX__', null, $roles, $icons); ?>
-                    </script>
-                </div><!-- /tab custom -->
+                        <div class="od-amh-card">
+                            <div class="od-amh-ch">
+                                <h2>Pořadí položek</h2>
+                                <span class="od-amh-sub">přetáhni myší</span>
+                            </div>
+                            <p class="od-amh-note">
+                                Podpoložky lze přetahovat jen v rámci svého rodiče. Kliknutím na šipku je rozbalíš.
+                            </p>
 
-                <?php submit_button('Uložit pro roli ' . $roles[$role]); ?>
+                            <ul id="od-amh-sortable" class="od-amh-list">
+                                <?php foreach ($ordered_top as $slug) : ?>
+                                    <li data-slug="<?php echo esc_attr($slug); ?>" class="od-amh-item">
+                                        <div class="od-amh-row">
+                                            <span class="dashicons dashicons-menu od-amh-grip"></span>
+                                            <span class="od-amh-title"><?php echo esc_html($tree[$slug]['title']); ?></span>
+                                            <code class="od-amh-slug" title="<?php echo esc_attr($slug); ?>"><?php echo esc_html($slug); ?></code>
+                                            <?php if ($tree[$slug]['subs']) : ?>
+                                                <button type="button" class="od-amh-toggle" aria-expanded="false" aria-label="Rozbalit podpoložky">
+                                                    <span class="dashicons dashicons-arrow-down-alt2"></span>
+                                                </button>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <?php if ($tree[$slug]['subs']) : ?>
+                                            <ul class="od-amh-subl" data-parent="<?php echo esc_attr($slug); ?>" hidden>
+                                                <?php foreach ($tree[$slug]['subs'] as $child_slug) : ?>
+                                                    <li data-slug="<?php echo esc_attr($child_slug); ?>" class="od-amh-subitem">
+                                                        <span class="dashicons dashicons-menu od-amh-grip"></span>
+                                                        <span class="od-amh-title"><?php echo esc_html($tree[$slug]['names'][$child_slug]); ?></span>
+                                                        <code class="od-amh-slug" title="<?php echo esc_attr($child_slug); ?>"><?php echo esc_html($child_slug); ?></code>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        <?php endif; ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============ Sekce 2: horní lišta ============ -->
+                <section id="od-amh-tab-bar" class="od-amh-panel" hidden>
+                    <div class="od-amh-card">
+                        <div class="od-amh-ch">
+                            <h2>Položky horní lišty</h2>
+                            <span class="od-amh-sub"><?php echo (int) count($bar_nodes); ?> položek, <?php echo (int) $bar_hidden_count; ?> skrytých</span>
+                        </div>
+                        <p class="od-amh-note">
+                            Seznam se bere z živé horní lišty, takže obsahuje i položky přidané jinými pluginy.
+                            Zaškrtnutím položku skryješ. Vyplněný název přepíše původní, prázdné pole nechá původní.
+                            Vlastní ikona nahradí tu původní.
+                            Položky se štítkem <span class="od-amh-tag is-amber is-inline">jen na frontendu</span> WordPress ukazuje
+                            jen při prohlížení webu. Aby se tu objevily i takové položky z jiných pluginů, otevři si jednou
+                            jako administrátor web a tuto stránku načti znovu.
+                        </p>
+
+                        <?php if (!$this->snapshot_bar) : ?>
+                            <p class="od-amh-warn">
+                                Horní lišta se teď nevykresluje, takže chybí položky z administrace. Zapni si ji v
+                                <a href="<?php echo esc_url(admin_url('profile.php')); ?>">svém profilu</a>
+                                (Zobrazovat panel nástrojů při prohlížení webu) a stránku načti znovu.
+                            </p>
+                        <?php endif; ?>
+
+                        <?php if ($bar_nodes) : ?>
+                            <div class="od-amh-table-wrap">
+                                <table class="od-amh-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:44px">Skrýt</th>
+                                            <th>Položka lišty</th>
+                                            <th style="width:240px">Vlastní název</th>
+                                            <th style="width:160px">Vlastní ikona</th>
+                                            <th style="width:160px">ID</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($bar_nodes as $node_id => $node) :
+                                        $edit  = isset($settings['bar_edit'][$node_id]) ? (array) $settings['bar_edit'][$node_id] : array();
+                                        $e_tit = isset($edit['title']) ? $edit['title'] : '';
+                                        $e_ico = isset($edit['icon']) ? $edit['icon'] : ''; ?>
+                                        <tr<?php echo 0 === $node['depth'] ? ' class="is-parent"' : ''; ?>>
+                                            <td><input type="checkbox" class="od-amh-chk" name="bar_hidden[]" value="<?php echo esc_attr($node_id); ?>" <?php checked(isset($bar_hidden[$node_id])); ?>></td>
+                                            <td class="od-amh-nm" style="padding-left:<?php echo (int) (10 + $node['depth'] * 22); ?>px">
+                                                <?php if ($node['depth'] > 0) : ?><span class="od-amh-arrow">&#8627;</span><?php endif; ?><span class="od-amh-nm-t"><?php echo esc_html($node['title']); ?></span>
+                                                <?php if (!empty($node['front'])) : ?>
+                                                    <span class="od-amh-tag is-amber">jen na frontendu</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <input type="text" class="od-amh-inp"
+                                                       name="bar_edit[<?php echo esc_attr($node_id); ?>][title]"
+                                                       value="<?php echo esc_attr($e_tit); ?>" placeholder="ponechat původní">
+                                            </td>
+                                            <td><?php $this->render_icon_picker('bar_edit[' . $node_id . '][icon]', $e_ico, $icons); ?></td>
+                                            <td><code><?php echo esc_html($node_id); ?></code></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </section>
+
+                <!-- ============ Sekce 3: vlastní položky lišty ============ -->
+                <section id="od-amh-tab-custom" class="od-amh-panel" hidden>
+                    <div class="od-amh-card">
+                        <div class="od-amh-ch">
+                            <h2>Vlastní položky lišty</h2>
+                            <span class="od-amh-sub">platí pro celý web, role se volí u každé položky</span>
+                            <div class="od-amh-sp"></div>
+                            <button type="button" class="od-amh-btn is-small" id="od-amh-add-item">+ Přidat položku</button>
+                        </div>
+                        <p class="od-amh-note">
+                            Vlastní položky nejsou vázané na roli vybranou nahoře, u každé si vybereš role, kterým se zobrazí.
+                            Do adresy můžeš napsat celou URL i jen část pro administraci, například
+                            <code>edit.php?post_type=faktura</code>. Pořadí změníš přetažením za úchyt vlevo.
+                        </p>
+
+                        <div id="od-amh-bar-items">
+                            <?php foreach ($bar_items as $i => $item) {
+                                $this->render_bar_item_row($i, $item, $roles, $icons);
+                            } ?>
+                        </div>
+                        <p class="od-amh-empty" id="od-amh-bar-empty"<?php echo $bar_items ? ' hidden' : ''; ?>>
+                            Zatím tu žádná vlastní položka není. Přidáš ji tlačítkem nahoře.
+                        </p>
+
+                        <script type="text/html" id="od-amh-item-template">
+                            <?php $this->render_bar_item_row('__INDEX__', null, $roles, $icons); ?>
+                        </script>
+                    </div>
+                </section>
             </form>
+            </main>
 
             <?php $this->render_icon_palette($icons); ?>
         </div>
-
-        <style>
-            .od-amh-list, .od-amh-sub { margin:0; padding:0; list-style:none; }
-            .od-amh-item { margin:0 0 6px; }
-            .od-amh-row, .od-amh-subitem {
-                display:flex; align-items:center; gap:8px;
-                padding:9px 12px; background:#fff; border:1px solid #dcdcde; border-radius:6px;
-            }
-            .od-amh-row { cursor:move; }
-            .od-amh-subitem { cursor:move; background:#f6f7f7; margin:6px 0 0 26px; padding:7px 12px; }
-            .od-amh-grip { color:#a7aaad; flex:0 0 auto; }
-            .od-amh-title { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-            .od-amh-slug {
-                flex:0 1 auto; max-width:170px; font-size:11px; color:#888; background:#f0f0f1;
-                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left;
-            }
-            .od-amh-toggle { flex:0 0 auto; text-decoration:none; line-height:1; }
-            .od-amh-toggle .dashicons { transition:transform .15s; }
-            .od-amh-toggle[aria-expanded="true"] .dashicons { transform:rotate(180deg); }
-            .od-amh-placeholder { border:1px dashed #8c8f94; border-radius:6px; background:#f0f6fc; }
-
-            .od-amh-tabs { margin-top:20px; }
-            .od-amh-front-tag {
-                display:inline-block; margin-left:6px; padding:1px 8px; border-radius:999px;
-                background:#f1efe8; color:#50575e; font-size:11px; line-height:18px; vertical-align:middle;
-            }
-            .od-amh-panel { padding-top:16px; }
-            .od-amh-box {
-                background:#fff; border:1px solid #dcdcde; border-left:4px solid #2271b1;
-                border-radius:4px; padding:12px 16px; margin:0 0 20px; max-width:820px;
-            }
-
-            /* vlastní položky lišty */
-            .od-amh-item-row {
-                display:flex; align-items:flex-start; gap:8px; max-width:980px;
-                background:#fff; border:1px solid #dcdcde; border-radius:6px;
-                padding:10px 12px; margin:0 0 8px;
-            }
-            .od-amh-item-grip { cursor:move; margin-top:6px; }
-            .od-amh-item-fields { flex:1 1 auto; min-width:0; }
-            .od-amh-item-line { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-            .od-amh-item-title { flex:0 1 220px; }
-            .od-amh-item-url { flex:1 1 300px; }
-            .od-amh-item-remove { color:#b32d2e; text-decoration:none; line-height:1; margin-left:auto; }
-            .od-amh-item-meta { margin-top:8px; font-size:12px; color:#50575e; }
-            .od-amh-roles { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-            .od-amh-roles label { display:inline-flex; align-items:center; gap:3px; }
-
-            /* výběr ikony */
-            .od-amh-icon-field { display:inline-flex; position:relative; }
-            .od-amh-icon-btn { display:inline-flex !important; align-items:center; gap:4px; }
-            .od-amh-icon-name { font-size:11px; color:#646970; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-            #od-amh-icon-pop {
-                position:absolute; z-index:9999; width:290px; padding:10px;
-                background:#fff; border:1px solid #c3c4c7; border-radius:6px; box-shadow:0 6px 20px rgba(0,0,0,.15);
-            }
-            #od-amh-icon-search { width:100%; margin-bottom:8px; }
-            .od-amh-icon-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:2px; max-height:260px; overflow:auto; }
-            .od-amh-icon-opt {
-                display:flex; align-items:center; justify-content:center;
-                width:32px; height:32px; padding:0; cursor:pointer;
-                background:none; border:1px solid transparent; border-radius:4px;
-            }
-            .od-amh-icon-opt:hover { background:#f0f6fc; border-color:#2271b1; }
-        </style>
-
-        <script>
-        jQuery(function ($) {
-            var $root  = $('#od-amh-sortable');
-            var $field = $('#od-amh-order');
-            if (!$root.length || !$.fn.sortable) { return; }
-
-            function collect() {
-                var data = { top: [], sub: {} };
-                $root.children('li').each(function () {
-                    var $li  = $(this);
-                    var slug = $li.attr('data-slug');
-                    data.top.push(slug);
-
-                    var subs = [];
-                    $li.children('ul.od-amh-sub').children('li').each(function () {
-                        subs.push($(this).attr('data-slug'));
-                    });
-                    if (subs.length) { data.sub[slug] = subs; }
-                });
-                $field.val(JSON.stringify(data));
-            }
-
-            $root.sortable({
-                axis: 'y',
-                items: '> li',
-                handle: '> .od-amh-row',
-                cancel: '.od-amh-toggle',
-                placeholder: 'od-amh-placeholder',
-                forcePlaceholderSize: true,
-                update: collect
-            });
-
-            $root.find('ul.od-amh-sub').sortable({
-                axis: 'y',
-                items: '> li',
-                placeholder: 'od-amh-placeholder',
-                forcePlaceholderSize: true,
-                update: collect
-            });
-
-            $root.on('click', '.od-amh-toggle', function () {
-                var $btn = $(this);
-                var $sub = $btn.closest('li').children('ul.od-amh-sub');
-                var open = $btn.attr('aria-expanded') === 'true';
-                $btn.attr('aria-expanded', open ? 'false' : 'true');
-                $sub.prop('hidden', open);
-            });
-
-            collect();
-        });
-
-        jQuery(function ($) {
-
-            /* ---------- záložky ---------- */
-            var $tabs = $('.od-amh-tabs .nav-tab');
-
-            $tabs.on('click', function (e) {
-                e.preventDefault();
-                var target = $(this).attr('href');
-                $tabs.removeClass('nav-tab-active');
-                $(this).addClass('nav-tab-active');
-                $('.od-amh-panel').prop('hidden', true);
-                $(target).prop('hidden', false);
-                try { window.localStorage.setItem('odAmhTab', target); } catch (err) {}
-            });
-
-            try {
-                var saved = window.localStorage.getItem('odAmhTab');
-                if (saved && $(saved).length) {
-                    $tabs.filter('[href="' + saved + '"]').trigger('click');
-                }
-            } catch (err) {}
-
-            /* ---------- výběr ikony ---------- */
-            var $pop    = $('#od-amh-icon-pop');
-            var $search = $('#od-amh-icon-search');
-            var $field  = null;
-
-            function closePop() {
-                if ($pop.prop('hidden')) { return; }
-                $pop.prop('hidden', true).appendTo('.wrap');
-                $field = null;
-            }
-
-            $(document).on('click', '.od-amh-icon-btn', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                var $this = $(this);
-                var $new  = $this.closest('.od-amh-icon-field');
-
-                if ($field && $field.is($new) && !$pop.prop('hidden')) { closePop(); return; }
-
-                $field = $new;
-                $pop.appendTo($field).prop('hidden', false).css({ top: $this.outerHeight() + 4, left: 0 });
-                $search.val('').trigger('input').trigger('focus');
-            });
-
-            $search.on('input', function () {
-                var q = $.trim($(this).val()).toLowerCase();
-                $pop.find('.od-amh-icon-opt').each(function () {
-                    var icon = $(this).attr('data-icon') || '';
-                    $(this).toggle(!q || icon.indexOf(q) !== -1);
-                });
-            }).on('keydown', function (e) {
-                if (e.key === 'Enter') { e.preventDefault(); }   // ať se neodešle formulář
-                if (e.key === 'Escape') { closePop(); }
-            });
-
-            $pop.on('click', function (e) { e.stopPropagation(); });
-
-            $pop.on('click', '.od-amh-icon-opt', function (e) {
-                e.preventDefault();
-                if (!$field) { return; }
-                var icon = $(this).attr('data-icon') || '';
-                $field.find('.od-amh-icon-input').val(icon);
-                $field.find('.od-amh-icon-btn .dashicons').attr('class', 'dashicons ' + (icon || 'dashicons-plus-alt2'));
-                $field.find('.od-amh-icon-name').text(icon || 'vybrat');
-                closePop();
-            });
-
-            $(document).on('click', closePop);
-
-            /* ---------- vlastní položky lišty ---------- */
-            var $items = $('#od-amh-bar-items');
-            var $order = $('#od-amh-bar-order');
-            if (!$items.length) { return; }
-
-            var counter = 0;
-
-            function collectBar() {
-                var keys = [];
-                $items.children('.od-amh-item-row').each(function () {
-                    keys.push($(this).attr('data-key'));
-                });
-                $order.val(JSON.stringify(keys));
-            }
-
-            $('#od-amh-add-item').on('click', function () {
-                var tpl  = $('#od-amh-item-template').html() || '';
-                var html = tpl.replace(/__INDEX__/g, 'new' + (counter++));
-                $items.append(html);
-                $items.children('.od-amh-item-row').last().find('.od-amh-item-title').trigger('focus');
-                collectBar();
-            });
-
-            $items.on('click', '.od-amh-item-remove', function () {
-                closePop();   // kdyby byla nabídka ikon otevřená právě v mazaném řádku
-                $(this).closest('.od-amh-item-row').remove();
-                collectBar();
-            });
-
-            if ($.fn.sortable) {
-                $items.sortable({
-                    axis: 'y',
-                    items: '> .od-amh-item-row',
-                    handle: '.od-amh-item-grip',
-                    placeholder: 'od-amh-placeholder',
-                    forcePlaceholderSize: true,
-                    update: collectBar
-                });
-            }
-
-            collectBar();
-        });
-        </script>
         <?php
     }
 

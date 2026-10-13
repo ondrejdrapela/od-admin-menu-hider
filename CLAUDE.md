@@ -4,32 +4,35 @@
 WordPress plugin, který upravuje administraci podle uživatelské role: skrývá celé levé menu nebo jeho jednotlivé položky a podpoložky, mění jejich pořadí, a upravuje horní lištu (skrytí položek, vlastní názvy a ikony, vlastní odkazy).
 
 ## Aktuální stav
-- Verze: 1.5.0
-- Naposledy hotovo: v záložce Horní lišta jdou skrýt, přejmenovat a označit ikonou i položky, které existují jen na frontendu (Upravit web, Přizpůsobit, Upravit stránku, Hledat a frontendové položky jiných pluginů).
+- Verze: 2.0.0
+- Naposledy hotovo: redesign administrace do stejného vzhledu jako Finance a Systém Soulado (boční menu, pilulky rolí, karty), aktualizace pluginu z bočního menu. Předtím (1.5.0) frontendové položky horní lišty (Upravit web, Přizpůsobit, Upravit stránku, Hledat).
 - Rozpracováno: na tomto pluginu nic.
-- Další na řadě: ověřit 1.5.0 na webu finance.odmarketing.cz (otevřít jednou frontend, zaškrtnout položky, zkontrolovat, že zmizí).
-- Známé chyby: žádné známé. Pozn.: v tomto prostředí není PHP, kód se dá před nasazením ověřit jen staticky.
+- Další na řadě: uživatel ověří 2.0.0 na webu finance.odmarketing.cz.
+- Známé chyby: žádné známé. Název uzlu Komentáře v liště se čistí na „00 komentářů…“ (kosmetika, zatím neřešeno).
 - Repozitář je od 13. 10. 2026 VEŘEJNÝ, aktualizace fungují na všech webech bez tokenu (stačí verze 1.3.0+ s PUC).
 
 ## Architektura
 - Hlavní soubor: `od-admin-menu-hider/od-admin-menu-hider.php` (třída `OD_Admin_Menu_Hider`)
-- Důležité soubory a složky: `readme.txt` (WP readme + changelog), `uninstall.php` (maže volbu `od_amh_hidden` při smazání pluginu). Distribuováno jako instalovatelný ZIP (Pluginy > Přidat plugin > Nahrát plugin).
+- Důležité soubory a složky: `readme.txt` (WP readme + changelog), `uninstall.php` (maže volby pluginu při smazání), `assets/admin.css` + `assets/admin.js` (vzhled a chování stránky nastavení, od 2.0.0), `assets/fonts/` (Sora, Plus Jakarta Sans lokálně). Distribuováno jako instalovatelný ZIP (Pluginy > Přidat plugin > Nahrát plugin).
 - Vlastní DB tabulky: žádné. Nastavení v `wp_options`: `od_amh_hidden` (per role), `od_amh_bar_items` (globální vlastní položky horní lišty) a `od_amh_bar_front` (uzly lišty zachycené na frontendu, bez autoloadu).
 - Napojení na externí služby: žádné.
 
 Klíčové části kódu:
-- Konstanty: `OPTION = od_amh_hidden`, `PAGE_SLUG = od-admin-menu-hider`, `NONCE`/action = `od_amh_save`.
+- Konstanty: `VERSION` (musí sedět s hlavičkou), `OPTION = od_amh_hidden`, `PAGE_SLUG = od-admin-menu-hider`, `NONCE`/action = `od_amh_save`.
 - Hooky `admin_menu` podle priority: 100 `register_page`, 9998 `take_snapshot`, 9999 `apply_hiding`, 10000 `apply_submenu_order`.
 - Horní lišta: `admin_bar_menu` 10000 `apply_bar_custom_items`; `wp_before_admin_bar_render` 9998 `take_bar_snapshot`, 9999 `apply_bar_changes` (skrytí + název + ikona).
 - `admin_head` + `wp_head` → `print_front_styles` (CSS pro skryté levé menu a pro potlačení původních ikon v liště).
 - `admin_post_od_amh_save` → `handle_save` (ukládání formuláře).
-- `admin_enqueue_scripts` → načtení `jquery-ui-sortable` jen na stránce pluginu.
+- `admin_enqueue_scripts` → jen na stránce pluginu: písma, `admin.css`, `admin.js` (závisí na `jquery-ui-sortable`).
+- Rám stránky: `admin_body_class` (`od-amh-app-page`), `admin_head` (zruší odsazení `html.wp-toolbar`), `render_sidebar()`, `admin_post_od_amh_check_update`, `update_plugin_complete_actions`.
 - Filtry: `custom_menu_order` + `menu_order` (pořadí horní úrovně), `plugin_action_links` (odkaz Nastavení).
 - Struktura volby per role: `[ 'role' => ['top'=>[], 'sub'=>[], 'order'=>[], 'order_sub'=>[], 'hide_menu'=>bool, 'bar_hidden'=>[], 'bar_edit'=>[id=>['title','icon']]] ]`.
 - Struktura `od_amh_bar_items`: seznam `['id'=>'odbar-xxx','icon'=>'dashicons-…','title'=>'','url'=>'','new_tab'=>bool,'roles'=>[]]`, pořadí = pořadí v poli.
 - Formát skryté podpoložky: `"rodic||potomek"`. JSON pořadí z formuláře: `{ top:[...], sub:{ rodic:[...] } }`.
 
 ## Specifika tohoto pluginu
+- Vzhled administrace (od 2.0.0) je společný s Finance (`odm-finance/includes/shell.php`) a Systémem Soulado: krémové pozadí, bílé boční menu, pilulky, karty. Při změnách držet stejný vzhled. Na stránce pluginu jsou lišta, levé menu a patička WP skryté jen CSS (lišta se dál vykresluje, takže snapshot lišty funguje). Sekce se přepínají v JS (`data-tab`, pamatuje se v localStorage `odAmhTab`), všechny jsou v jednom formuláři. JS se váže na id prvků (`od-amh-order`, `od-amh-sortable`, `od-amh-bar-items`…), neměnit.
+- Testování: PHP lokálně není, ale jde použít WordPress Playground: `npx @wp-playground/cli server --php=8.3 --port=9410 --login --mount=./od-admin-menu-hider:/wordpress/wp-content/plugins/od-admin-menu-hider --blueprint=<soubor.json>` (blueprint musí být soubor .json; automatické přihlášení nemusí zabrat, testovací účet Playgroundu je admin).
 - Seznam menu se generuje dynamicky z živého menu. Snapshot (`$menu`, `$submenu`) se bere PŘED skrytím (priorita 9998), takže i aktuálně skryté položky zůstávají v seznamu a jdou zase odškrtnout. Pořadí hooků (100/9998/9999/10000) neměnit.
 - Vlastní stránku pluginu nelze nikdy skrýt (guard na `PAGE_SLUG`).
 - `clean_title` odstraňuje `<span>` i s obsahem, zevnitř ven (kvůli WP bublinám s počty aktualizací a textu pro čtečky), s fallbackem, kdyby byl název celý uvnitř spanu. Nesmí sežrat legitimní název (např. text ve `<strong>`).

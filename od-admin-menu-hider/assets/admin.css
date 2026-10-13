@@ -1,0 +1,180 @@
+/* OD Skrývač admin menu – administrace (2.0.0). Stejný vzhled jako Finance, Systém Soulado a PPC Reporty. */
+
+/* Na stránce pluginu skryjeme lištu, levé menu i patičku WordPressu. */
+body.od-amh-app-page #wpadminbar,
+body.od-amh-app-page #adminmenumain,
+body.od-amh-app-page #wpfooter{display:none!important}
+body.od-amh-app-page #wpcontent{margin-left:0!important;padding-left:0!important}
+body.od-amh-app-page #wpbody{padding-top:0!important}
+body.od-amh-app-page #wpbody-content{padding-bottom:0;float:none}
+body.od-amh-app-page,body.od-amh-app-page #wpwrap,body.od-amh-app-page #wpcontent{background:#f1efe8}
+body.od-amh-app-page .notice,body.od-amh-app-page .update-nag{margin:12px 0}
+
+/* Rám a boční menu */
+.od-amh-app{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh;font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;color:#1a1917;-webkit-font-smoothing:antialiased}
+.od-amh-sb{position:sticky;top:0;height:100vh;box-sizing:border-box;z-index:50;display:flex;flex-direction:column;padding:18px 14px;overflow-y:auto;background:#fff;border-right:1px solid #ebe8df}
+.od-amh-sb-logo,.od-amh-mtop-brand{display:flex;flex-direction:column;gap:5px;padding:6px 8px 22px;text-decoration:none;color:#1a1917}
+.od-amh-sb-logo:focus,.od-amh-mtop-brand:focus{box-shadow:none}
+.od-amh-sb-logo b,.od-amh-mtop-brand b{font-family:'Sora',sans-serif;font-size:16px;font-weight:700;letter-spacing:.5px}
+.od-amh-sb-logo span,.od-amh-mtop-brand span{font-family:'Sora',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:2.2px;text-transform:uppercase;color:#9a9a92}
+.od-amh-sb-nav{display:grid;gap:2px}
+.od-amh-sb-nav a,.od-amh-sb-bottom>a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;font-size:13.5px;font-weight:600;line-height:1.3;color:#55534b;text-decoration:none;transition:background .15s,color .15s}
+.od-amh-sb svg{width:17px;height:17px;flex:none;opacity:.75}
+.od-amh-sb-nav a:hover,.od-amh-sb-bottom>a:hover{background:#f1efe8;color:#1a1917}
+.od-amh-sb a:focus{box-shadow:none;outline:2px solid #1a1917;outline-offset:1px}
+.od-amh-sb a:focus:not(:focus-visible){outline:none}
+.od-amh-sb-nav a.is-active{background:#1a1a1a;color:#fff}
+.od-amh-sb-nav a.is-active svg{opacity:1}
+.od-amh-sb-count{margin-left:auto;font-size:10.5px;font-weight:700;background:#f0f0ed;color:#5f5f58;border-radius:999px;padding:1px 7px}
+.od-amh-sb-nav a.is-active .od-amh-sb-count{background:#3a3a3a;color:#fff}
+.od-amh-sb-count.is-red{background:#fce8e6;color:#c5221f}
+.od-amh-sb-bottom{margin-top:auto;padding-top:12px;border-top:1px solid #f3f1ea;display:grid;gap:2px}
+.od-amh-sb-update{color:#1a1917!important;background:#f1efe8}
+.od-amh-sb-bottom>a.is-busy{pointer-events:none;opacity:.7}
+.od-amh-sb-bottom>a.is-busy svg{animation:od-amh-spin 1s linear infinite}
+@keyframes od-amh-spin{to{transform:rotate(360deg)}}
+.od-amh-sb-user{display:flex;align-items:center;gap:10px;padding:10px 8px 2px}
+.od-amh-sb-ava{width:32px;height:32px;border-radius:10px;background:#1a1a1a;color:#fff;display:grid;place-items:center;font-family:'Sora',sans-serif;font-size:11px;font-weight:800;flex:none}
+.od-amh-sb-user strong{display:block;font-size:13px;line-height:1.3}
+.od-amh-sb-user a{font-size:12px;color:#9a9a92;text-decoration:none}
+.od-amh-sb-user a:hover{color:#1a1917}
+.od-amh-sb-ver{font-size:11px;color:#b3b2aa;padding:6px 8px 0}
+.od-amh-app .od-amh-sb-toggle{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.od-amh-mtop,.od-amh-sb-backdrop{display:none}
+
+/* Hlavní část */
+.od-amh-main{min-width:0;max-width:1680px;box-sizing:border-box;padding:32px clamp(16px,3.5vw,48px) 64px}
+.od-amh-main *{box-sizing:border-box}
+.od-amh-main h1,.od-amh-main h2{font-family:'Sora',sans-serif;color:#1a1917;margin:0;padding:0}
+.od-amh-main h1{font-size:24px;font-weight:600;letter-spacing:-.01em;line-height:1.3;margin-top:2px}
+.od-amh-main h2{font-size:16px;font-weight:600;line-height:1.4}
+.od-amh-main code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:#f6f5f0;color:#5f5f58;border-radius:6px;padding:2px 7px;margin:0}
+.od-amh-main p{margin:0}
+.od-amh-head{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.od-amh-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#88887f;display:flex;align-items:center;gap:6px}
+.od-amh-eyebrow::before{content:'';width:6px;height:6px;border-radius:50%;background:#3a2797}
+.od-amh-sp{flex:1}
+.od-amh-saved{font-size:12px;color:#1c6223;background:#e1f2e4;border-radius:999px;padding:3px 10px;font-weight:600}
+
+.od-amh-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:999px;border:1px solid #e7e7e5;background:#fff;color:#1a1917;font:600 13px/1.3 'Plus Jakarta Sans',sans-serif;cursor:pointer;text-decoration:none}
+.od-amh-btn:hover{border-color:#c9c7bf;color:#1a1917}
+.od-amh-btn.is-primary{background:#141414;border-color:#141414;color:#fff}
+.od-amh-btn.is-primary:hover{background:#000;color:#fff}
+.od-amh-btn.is-small{padding:5px 12px;font-size:12px}
+
+.od-amh-roles-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.od-amh-roles-bar .od-amh-k{font-size:12px;color:#88887f;margin-right:4px}
+.od-amh-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;border:1px solid #e7e7e5;background:#fff;color:#1a1917;font-size:13px;font-weight:500;line-height:1.3;cursor:pointer;text-decoration:none;user-select:none}
+.od-amh-pill:hover{border-color:#c9c7bf;color:#1a1917}
+.od-amh-pill.is-on,.od-amh-pill:has(input:checked){background:#141414;border-color:#141414;color:#fff}
+.od-amh-pill:focus{box-shadow:none}
+.od-amh-pill input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.od-amh-pill:focus-within{outline:2px solid #1a1917;outline-offset:1px}
+
+.od-amh-tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;line-height:1.5;vertical-align:middle;margin-left:6px}
+.od-amh-tag.is-amber{background:#fbf0d9;color:#8a5a00}
+.od-amh-tag.is-grey{background:#f0f0ed;color:#5f5f58}
+.od-amh-tag.is-inline{margin:0}
+
+.od-amh-card{background:#fff;border:1px solid #e7e7e5;border-radius:12px;padding:20px 22px;margin-bottom:16px}
+.od-amh-ch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.od-amh-ch .od-amh-sub{color:#88887f;font-size:12.5px}
+.od-amh-note{color:#55534b;font-size:13px;max-width:860px;margin:0 0 14px!important}
+.od-amh-warn{background:#fbf0d9;color:#8a5a00;border-radius:10px;padding:10px 14px;font-size:13px;margin:0 0 14px!important}
+.od-amh-warn a{color:inherit}
+.od-amh-grid{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:16px;align-items:start}
+@media(max-width:1200px){.od-amh-grid{grid-template-columns:minmax(0,1fr)}}
+.od-amh-panel[hidden]{display:none}
+
+/* Tabulky */
+.od-amh-table-wrap{overflow-x:auto}
+.od-amh-table{width:100%;border-collapse:collapse;font-size:13px}
+.od-amh-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#88887f;font-weight:500;padding:8px 10px;border-bottom:1px solid #e7e7e5;white-space:nowrap}
+.od-amh-table td{padding:8px 10px;border-bottom:1px solid #f0f0ec;vertical-align:middle}
+.od-amh-table tbody tr:hover td{background:#fbfaf7}
+.od-amh-table tr.is-parent td.od-amh-nm{font-weight:600}
+.od-amh-table td.od-amh-nm{min-width:200px}
+.od-amh-table .od-amh-inp{min-width:150px}
+.od-amh-table td code{white-space:nowrap}
+.od-amh-table tr:has(.od-amh-chk:checked) td.od-amh-nm .od-amh-nm-t{color:#9a9a92;text-decoration:line-through}
+.od-amh-arrow{color:#b9b8b0;margin-right:4px}
+.od-amh-dash{color:#b9b8b0}
+
+/* Vlastní zaškrtávátko */
+.od-amh-app input[type=checkbox].od-amh-chk{appearance:none;-webkit-appearance:none;width:18px;height:18px;min-width:18px;border:1.5px solid #c9c7bf;border-radius:6px;background:#fff;display:inline-grid;place-items:center;cursor:pointer;margin:0;padding:0;vertical-align:middle;box-shadow:none}
+.od-amh-app input[type=checkbox].od-amh-chk:checked{background:#141414;border-color:#141414}
+.od-amh-app input[type=checkbox].od-amh-chk::before{content:none!important}
+.od-amh-app input[type=checkbox].od-amh-chk:checked::after{content:'';width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.od-amh-app input[type=checkbox].od-amh-chk:focus-visible{outline:2px solid #1a1917;outline-offset:1px}
+.od-amh-check-label{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:#55534b}
+
+/* Přepínač Skrýt celé levé menu */
+.od-amh-switch{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.od-amh-switch input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.od-amh-switch-t{width:38px;height:22px;border-radius:999px;background:#d9d7cf;position:relative;flex:none;margin-top:2px;transition:background .15s}
+.od-amh-switch-t::after{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.od-amh-switch input:checked+.od-amh-switch-t{background:#141414}
+.od-amh-switch input:checked+.od-amh-switch-t::after{left:19px}
+.od-amh-switch input:focus-visible+.od-amh-switch-t{outline:2px solid #1a1917;outline-offset:2px}
+.od-amh-switch b{font-size:14px}
+.od-amh-switch small{display:block;color:#88887f;font-size:12.5px;margin-top:2px;line-height:1.6}
+
+/* Textová pole */
+.od-amh-app input[type=text].od-amh-inp{width:100%;min-height:34px;padding:6px 11px;border:1px solid #e7e7e5;border-radius:10px;font:13px 'Plus Jakarta Sans',sans-serif;background:#fff;color:#1a1917;box-shadow:none;margin:0}
+.od-amh-app input[type=text].od-amh-inp:focus{border-color:#141414;box-shadow:none;outline:none}
+.od-amh-app input[type=text].od-amh-inp::placeholder{color:#b3b2aa}
+
+/* Pořadí (přetahování) */
+.od-amh-list,.od-amh-subl{margin:0;padding:0;list-style:none}
+.od-amh-item{margin:0 0 6px}
+.od-amh-row,.od-amh-subitem{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fff;border:1px solid #e7e7e5;border-radius:10px;font-size:13px;cursor:move}
+.od-amh-subitem{background:#fbfaf7;margin:6px 0 0 24px;padding:7px 12px}
+.od-amh-grip{color:#b9b8b0;flex:0 0 auto;font-size:16px;width:16px;height:16px}
+.od-amh-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.od-amh-row .od-amh-title{font-weight:600}
+.od-amh-slug{flex:0 1 auto;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.od-amh-toggle{flex:0 0 auto;display:grid;place-items:center;width:26px;height:26px;border-radius:8px;border:0;background:#f1efe8;color:#55534b;cursor:pointer;padding:0}
+.od-amh-toggle .dashicons{font-size:16px;width:16px;height:16px;transition:transform .15s}
+.od-amh-toggle[aria-expanded="true"] .dashicons{transform:rotate(180deg)}
+.od-amh-placeholder{border:1px dashed #c9c7bf;border-radius:10px;background:#f6f5f0}
+
+/* Vlastní položky lišty */
+.od-amh-item-row{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid #e7e7e5;border-radius:12px;margin:0 0 10px;background:#fff}
+.od-amh-item-grip{cursor:move;margin-top:8px}
+.od-amh-item-fields{flex:1 1 auto;min-width:0;display:grid;gap:10px}
+.od-amh-item-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.od-amh-app input[type=text].od-amh-item-title{flex:0 1 220px;width:auto}
+.od-amh-app input[type=text].od-amh-item-url{flex:1 1 300px;width:auto}
+.od-amh-item-remove{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;border:0;background:none;color:#c5221f;cursor:pointer;padding:0;margin-left:auto}
+.od-amh-item-remove:hover{background:#fce8e6}
+.od-amh-item-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#88887f}
+.od-amh-item-meta .od-amh-pill{padding:3px 10px;font-size:12px}
+.od-amh-empty{color:#88887f;font-size:13px;padding:6px 0 12px}
+
+/* Výběr ikony */
+.od-amh-icon-field{display:inline-flex;position:relative}
+.od-amh-icon-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px dashed #c9c7bf;border-radius:999px;background:#fff;font:12px 'Plus Jakarta Sans',sans-serif;color:#55534b;cursor:pointer;white-space:nowrap;min-height:32px}
+.od-amh-icon-btn.has-icon{border-style:solid;border-color:#e7e7e5;color:#1a1917}
+.od-amh-icon-btn:hover{border-color:#141414}
+.od-amh-icon-btn .dashicons{font-size:16px;width:16px;height:16px}
+.od-amh-icon-name{max-width:110px;overflow:hidden;text-overflow:ellipsis}
+#od-amh-icon-pop{position:absolute;z-index:9999;width:300px;padding:10px;background:#fff;border:1px solid #e7e7e5;border-radius:12px;box-shadow:0 12px 32px rgba(26,25,23,.16)}
+#od-amh-icon-pop input[type=search]{width:100%;margin:0 0 8px;padding:6px 11px;border:1px solid #e7e7e5;border-radius:10px;font:13px 'Plus Jakarta Sans',sans-serif;box-shadow:none}
+.od-amh-icon-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;max-height:260px;overflow:auto}
+.od-amh-icon-opt{display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;cursor:pointer;background:none;border:1px solid transparent;border-radius:8px;color:#1a1917}
+.od-amh-icon-opt:hover{background:#f1efe8;border-color:#141414}
+
+/* Mobil */
+@media(max-width:900px){
+  .od-amh-app{grid-template-columns:minmax(0,1fr);align-content:start}
+  .od-amh-sb{position:fixed;left:0;top:0;width:264px;transform:translateX(-100%);transition:transform .25s ease,box-shadow .25s;z-index:100001}
+  .od-amh-sb-toggle:checked~.od-amh-sb{transform:none;box-shadow:0 20px 50px rgba(0,0,0,.2)}
+  .od-amh-sb-toggle:checked~.od-amh-sb-backdrop{display:block;position:fixed;inset:0;background:rgba(26,25,23,.35);z-index:100000}
+  .od-amh-mtop{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:60;padding:10px 16px;background:rgba(241,239,232,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid #ebe8df}
+  .od-amh-mtop-brand{padding:0}
+  .od-amh-mtop-btn{width:38px;height:38px;border-radius:11px;border:1px solid #ebe8df;background:#fff;display:grid;place-items:center;cursor:pointer}
+  .od-amh-mtop-btn svg{width:18px;height:18px}
+  .od-amh-main{padding:20px 16px 48px}
+  .od-amh-card{padding:16px}
+}
+@media(prefers-reduced-motion:reduce){.od-amh-sb{transition:none}}
